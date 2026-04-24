@@ -1,0 +1,17 @@
+Replace this directory's hero.png with a real screenshot of the live demo.
+
+Steps:
+  1. Open https://vnmoorthy.github.io/Skylog/
+  2. Pan to a busy area (London, NYC, Frankfurt)
+  3. Wait for planes to render and the digest card to populate
+  4. Take a full-window screenshot (cmd+shift+4 then space then click window on macOS)
+  5. Save as docs/hero.png in this repo
+  6. Re-commit + push
+
+Optional (better): record a 10-15s screen recording of:
+  - Map loading + planes appearing
+  - Click a plane → FlightCard opens
+  - Press 'm' to open memory drawer
+  - Press 'f' and type a callsign
+Convert to GIF with: ffmpeg -i input.mov -vf "fps=12,scale=900:-1:flags=lanczos" docs/demo.gif
+Swap the README image src to docs/demo.gif.

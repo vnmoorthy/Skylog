@@ -1,187 +1,265 @@
-# SKYLOG
+<div align="center">
 
-A real-time map of every plane flying near you, plus the ISS and other named satellites. Click a plane for its registration, type, altitude, and heading. Set a home location and Skylog will also log every aircraft that passes within your radius, estimate the ground-level loudness, and let you scrub through the last 24 hours on a timeline. All data lives in your browser — no account, no server, no third-party tracker.
+# 🛩️ Skylog
 
-![Skylog screenshot](./docs/screenshot.png)
+### The flight tracker that **remembers every plane** it sees over your house.
 
-## Why
+**[🌍 Live Demo](https://vnmoorthy.github.io/Skylog/)** · **[📖 Docs](#how-it-works)** · **[💬 Discussions](https://github.com/vnmoorthy/Skylog/discussions)**
 
-Flight trackers are optimised for airline route-planners, not curious humans. They load slowly, bury data behind paywalls, and ask you to guess which moving dot woke you up at 3 AM. Skylog inverts that: open the app and within three seconds you are staring at a dark map with every ADS-B-equipped aircraft within the viewport rendered as a rotated arrow, coloured by altitude, moving smoothly. That is the whole product. Everything else — pass logs, loudness, satellites — is a layer on top.
+[![License: MIT](https://img.shields.io/badge/License-MIT-ff8a4c.svg?style=flat-square)](https://opensource.org/licenses/MIT)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue.svg?style=flat-square)](https://www.typescriptlang.org/)
+[![Tests](https://img.shields.io/badge/tests-101%20passing-43e27a.svg?style=flat-square)](#)
+[![No Tracker](https://img.shields.io/badge/tracker-none-43e27a.svg?style=flat-square)](#)
+[![No Account](https://img.shields.io/badge/account-none-43e27a.svg?style=flat-square)](#)
+[![Stars](https://img.shields.io/github/stars/vnmoorthy/Skylog?style=flat-square&color=ff8a4c)](https://github.com/vnmoorthy/Skylog/stargazers)
 
-## What's new in v0.4
+![Skylog hero screenshot](./docs/hero.svg)
 
-- **Track a flight by number.** Paste any callsign (`UAL841`, `BA286`) in the track-flight prompt (`f`) and Skylog pins that aircraft globally — even when it leaves the viewport. Optional follow-on-map keeps the camera centered on the tracked plane as it flies.
-- **Live ETA to your home.** If a home is set, the tracked flight card shows distance and a rough ETA updated every poll.
-- **Browser notification when the tracked flight is within 5 km of home.** Opt-in, rate-limited. You'll know before it's overhead.
-- **Pattern detection over memory.** Skylog's aircraft memory now surfaces regular visitors — aircraft that cluster into the same weekday+hour. "Tuesdays around 07:00, 4 sightings." The memory drawer ranks them. The digest card surfaces the top three on the home screen.
-- **Always-visible daily digest.** A persistent card on the live map shows today vs yesterday, first-timers today, and your busiest hour of day. Collapses if you dismiss it.
+*Pan anywhere on the world, see live aircraft. Click a plane for everything we know about it. Set a home location, and Skylog will silently learn the regulars over your roof.*
 
-## Features
+</div>
 
-- **Live map as the first screen.** No onboarding gate. Open the page, the map centers on your location if you grant geolocation, otherwise a busy default (NYC), and the airplanes.live global feed populates the viewport in under five seconds.
-- **Smooth motion between polls.** The feed returns a snapshot every ten seconds; Skylog dead-reckons each aircraft's position at 10 Hz using its broadcast velocity and track, so planes move smoothly instead of teleporting.
-- **Click-to-identify.** Tap any aircraft for airline, callsign, aircraft type, registration, altitude, speed, heading, squawk, and data source. Aircraft metadata is resolved client-side against a bundled compact JSON built from the OpenSky aircraft database.
-- **Nearest-to-home indicator.** When you have a home set, the bottom-left corner always shows the three nearest aircraft ranked by distance — click to jump to their detail card.
-- **Aircraft list (shortcut `l`).** Sortable, searchable list of every plane in view. Filter by callsign, ICAO24, or country. Sort by altitude or distance from home.
-- **Satellites (shortcut `s`).** ISS and the rest of the Celestrak "stations" group, propagated in-browser with [satellite.js](https://github.com/shashwatak/satellite-js)'s SGP4 port. Click a satellite for a dashed ground-track preview showing its last 90 minutes and next 90 minutes.
-- **Pass logger + loudness model.** If you set a home, a Web Worker polls OpenSky for your bounding box and aggregates each aircraft into a "pass" with closest approach time, ground distance, altitude, and an estimated dB(A) SPL using the inverse-square law + ISO 9613-2:1996 §7.2 atmospheric absorption. Browse the last 72 hours on a zoomable timeline.
+---
 
-## Keyboard shortcuts
+## Why Skylog?
 
-| key | action |
+Every flight tracker on the internet is **amnesic**. Open Flightradar24, see a plane, click away — the app forgets it instantly. There's no concept of "your sky" because there's no concept of *you*.
+
+Skylog inverts that:
+
+- **It's yours.** No account, no tracker, no server. Your sky data lives only in your browser's IndexedDB.
+- **It remembers.** Every aircraft Skylog renders gets saved with its callsigns, altitudes, and timestamps. After three days you'll discover that the 737 you keep hearing at 7 AM is the same airframe (UAL841) on the same daily route.
+- **It tracks specific flights.** Paste a callsign, get a globally pinned flight + ETA to your home + a browser notification when it's 5 km out. The single-keystroke version of "is my partner's flight on time?".
+- **It's worldwide.** Pan to Tokyo, Frankfurt, Dubai, Lagos — wherever the airplanes.live community has feeders, Skylog shows live traffic.
+
+---
+
+## ✨ Features
+
+|   | Feature | Status |
+| - | --- | :-: |
+| 🌍 | Worldwide live aircraft map (every ADS-B-equipped plane in view) | ✅ |
+| 🧠 | **Persistent memory** — every plane Skylog sees is saved to your device | ✅ |
+| 🔁 | **Pattern detection** — finds your "regular visitors" by weekday + hour | ✅ |
+| 🎯 | **Track a flight by callsign** — paste it, pin it, follow it globally | ✅ |
+| 🔔 | Browser notification when a tracked flight is within 5 km of home | ✅ |
+| 🛰️ | ISS + Celestrak satellite overlay with 90-min ground tracks | ✅ |
+| 📊 | Daily digest: today vs yesterday, peak hour, top regulars | ✅ |
+| 📞 | On-device acoustic model: estimate ground-level dB(A) of any pass | ✅ |
+| 🗂️ | Searchable / sortable list of every aircraft in view | ✅ |
+| 🌐 | Region presets: jump to Europe, Asia, Middle East, Oceania, etc. | ✅ |
+| 📱 | Mobile responsive — works on phones | ✅ |
+| ⌨️ | Keyboard-driven (`f` track flight, `m` memory, `s` satellites, `?` help) | ✅ |
+| 🔒 | **Zero tracking. Zero cookies. Zero accounts. MIT licensed.** | ✅ |
+
+---
+
+## 🆚 vs Flightradar24, FlightAware, ADS-B Exchange
+
+|   | Skylog | FR24 | FlightAware | ADS-B Exchange |
+| --- | :-: | :-: | :-: | :-: |
+| Free | ✅ | Limited | Limited | ✅ |
+| Open source | ✅ | ❌ | Some | Some |
+| Self-hostable | ✅ | ❌ | ❌ | Partial |
+| No account required | ✅ | ❌ | ❌ | ✅ |
+| No third-party tracker | ✅ | ❌ | ❌ | ❌ |
+| **Per-aircraft persistent memory** | ✅ | ❌ | ❌ | ❌ |
+| **Pattern detection ("regulars over your house")** | ✅ | ❌ | ❌ | ❌ |
+| Track a flight by callsign | ✅ | ✅ | ✅ | ❌ |
+| Browser-native push alerts | ✅ | App-only | App-only | ❌ |
+| Satellite overlay | ✅ | ❌ | ❌ | ❌ |
+| Ground-level loudness estimate | ✅ | ❌ | ❌ | ❌ |
+| Worldwide coverage | Community feed | Comprehensive | Comprehensive | Comprehensive |
+
+Skylog isn't trying to win on raw data quantity. It's trying to win on **knowing about *your* sky**.
+
+---
+
+## 🚀 Run it in 60 seconds
+
+```bash
+git clone https://github.com/vnmoorthy/Skylog.git
+cd Skylog
+pnpm install
+pnpm dev
+```
+
+Open http://localhost:5173. That's it. No env vars. No accounts. No databases to provision.
+
+Or skip the local install and **[try the live demo](https://vnmoorthy.github.io/Skylog/)**.
+
+### Self-host on your own subdomain
+
+The `main` branch auto-deploys to GitHub Pages on push (see [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)). Fork the repo, enable Pages with source "GitHub Actions", and your fork is live at `https://YOU.github.io/Skylog/` within minutes. No backend infra. No costs.
+
+---
+
+## How it works
+
+```
+ ┌─────────────────────────────────────────────────────────────┐
+ │                         BROWSER                             │
+ │                                                             │
+ │  ┌─────────┐   bbox poll       ┌──────────────────────┐     │
+ │  │ MapLibre│ ────────────────▶ │ airplanes.live API   │     │
+ │  │ canvas  │ ◀──── states ──── │ (no auth, CORS-ok)   │     │
+ │  └─────┬───┘                   └──────────────────────┘     │
+ │        │ rAF dead-reckoning                                 │
+ │        │ at 10 Hz between polls                             │
+ │        ▼                                                    │
+ │  ┌──────────────┐                                           │
+ │  │  React UI    │   sightings   ┌───────────────────┐       │
+ │  │  - FlightCard│ ────────────▶ │   IndexedDB       │       │
+ │  │  - DigestCard│ ◀── memory ── │   (Dexie schema)  │       │
+ │  │  - Memory    │               └───────────────────┘       │
+ │  └──────────────┘                                           │
+ │                                                             │
+ │  ┌──────────────┐    ┌──────────────────┐                   │
+ │  │ TLE worker   │ ── │ Celestrak (TLE)  │  satellite.js     │
+ │  │ (sat orbits) │    └──────────────────┘  SGP4 client-side │
+ │  └──────────────┘                                           │
+ └─────────────────────────────────────────────────────────────┘
+```
+
+**Stack:** Vite · React 18 · TypeScript strict · Tailwind · Zustand · Dexie · MapLibre GL · D3 scales · satellite.js · Web Worker for the home-radius pass logger.
+
+**Data sources:**
+- [airplanes.live](https://airplanes.live/) — community ADS-B network, CORS-safe, no key needed
+- [Celestrak](https://celestrak.org/) — TLEs for satellite propagation
+- [CARTO](https://carto.com/) — dark basemap tiles
+- [OpenSky aircraft DB](https://opensky-network.org/) — bundled aircraft type / operator metadata
+
+---
+
+## 🧠 The memory feature, explained
+
+This is the differentiator. Every aircraft that enters your viewport is folded into IndexedDB:
+
+```ts
+interface AircraftSighting {
+  icao24: string;
+  lastCallsign: string | null;
+  callsigns: readonly string[];     // every distinct callsign used
+  registration: string | null;
+  typecode: string | null;
+  operator: string | null;
+  firstSeenAt: number;              // unix-ms
+  lastSeenAt: number;
+  sightingCount: number;            // total polls including this aircraft
+  dayCount: number;                 // distinct UTC days seen
+  maxAltitudeM: number | null;
+  minAltitudeM: number | null;
+  recentDays: string;               // CSV of last 30 YYYY-MM-DD
+  recentTimes: string;              // CSV of last 100 timestamps
+}
+```
+
+The `recentTimes` slice powers `dominantPattern()`: bucket sightings by `(weekday, hour)` and surface any cluster of 3+ as a "regular visitor". After a week of leaving a tab open, the memory drawer reads:
+
+> **Regular visitors over your sky:**
+> CMP809 — Tuesdays around 07:00, ×7 sightings
+> OCN642 — Tuesdays around 07:00, ×6 sightings
+> BAW185 — Saturdays around 13:00, ×4 sightings
+
+That's not data Flightradar24 will ever show you, because Flightradar24 doesn't know what *your* sky looks like.
+
+---
+
+## 🔬 The acoustic model (when home is set)
+
+For each aircraft sample, Skylog estimates ground-level A-weighted SPL using:
+
+1. **Inverse-square law** for geometric spreading: `L(r) = L_src - 20·log₁₀(r/1m)`
+2. **ISO 9613-2:1996 §7.2** atmospheric absorption: `α ≈ 0.005 dB/m` at 10°C / 60% RH for broadband aircraft noise (~500–1000 Hz)
+
+Combined: `L_observed = L_source - 20·log₁₀(r_slant) - α·r_slant`
+
+Source levels are calibrated per ICAO aircraft category (HEAVY=140 dB, LARGE=135, SMALL=125, LIGHT=105, ROTORCRAFT=130) against published FAA flyover data. Constants and citations: [`src/lib/acoustics.ts`](./src/lib/acoustics.ts).
+
+A 737 at 3,000 ft directly overhead → ~71 dB. Roughly the volume of a vacuum cleaner in the next room.
+
+What the model deliberately doesn't do: ground reflection, directivity, thrust modulation, per-frequency absorption, weather. The goal is to distinguish a 747 from a Cessna at a glance, not to replace a certified noise meter.
+
+---
+
+## ⌨️ Keyboard shortcuts
+
+| Key | Action |
 | --- | --- |
-| `s` | toggle satellites |
-| `l` | toggle aircraft list |
-| `h` | open home setup |
-| `t` | open timeline (requires home) |
-| `?` | help |
-| `esc` | close the active panel |
+| `f` | Track a specific flight by callsign |
+| `m` | Open the aircraft memory drawer |
+| `s` | Toggle satellite overlay |
+| `l` | Toggle the in-view aircraft list |
+| `h` | Open home setup |
+| `t` | Open the pass timeline (requires home) |
+| `?` | Show this help |
+| `esc` | Close the active panel |
 
-## How the loudness model works
+---
 
-For each aircraft sample we receive, we estimate the A-weighted sound pressure level (SPL) at the user's home using two physical effects in series: geometric spreading (the inverse-square law) and atmospheric absorption.
-
-### The inverse-square law
-
-A point source radiating power **W** into a free field spreads that power over an expanding spherical wavefront of area **4πr²**. Intensity is power per area, so intensity falls as **1/r²**:
-
-$$
-I(r) = \frac{W}{4\pi r^{2}}
-$$
-
-SPL is logarithmic against a reference. Because intensity is proportional to the square of pressure, doubling distance halves pressure and SPL drops by exactly **20·log₁₀(2) ≈ 6.02 dB**:
-
-$$
-L(r) = L_{\mathrm{ref}} - 20\,\log_{10}\!\left(\frac{r}{r_{\mathrm{ref}}}\right)
-$$
-
-We take **r_ref = 1 m** and calibrate source levels **L_ref** per aircraft category against published certification data.
-
-### Atmospheric absorption
-
-Molecular relaxation of nitrogen and oxygen, viscosity, and thermal conduction remove acoustic energy as the wave travels. ISO 9613-2:1996 §7.2 defines a frequency-, temperature-, and humidity-dependent attenuation coefficient **α** in dB/m. For broadband aircraft noise centred around 500–1000 Hz at 10 °C / 60 % RH / 101.325 kPa, a representative single-number collapse is approximately **0.005 dB/m** (= 5 dB/km). We apply this linearly.
-
-### Combined equation
-
-$$
-L_{\mathrm{observed}} \;=\; L_{\mathrm{source}} \;-\; 20\,\log_{10}\!\left(\frac{r_{\mathrm{slant}}}{1\,\mathrm{m}}\right) \;-\; \alpha\, r_{\mathrm{slant}}
-$$
-
-Where **r_slant = √(ground_distance² + altitude²)**. A pass's reported dB is the *minimum* r_slant over the pass — the point of closest approach.
-
-### Constants
-
-| Symbol | Meaning | Value | Units | Source |
-| --- | --- | --- | --- | --- |
-| L_src HEAVY (747) | Source level at 1 m | 140 | dB(A) | FAA AC 36-1H flyover data |
-| L_src LARGE (737/A320) | Source level at 1 m | 135 | dB(A) | FAA AC 36-1H |
-| L_src SMALL (regional) | Source level at 1 m | 125 | dB(A) | FAA AC 36-1H |
-| L_src LIGHT (Cessna) | Source level at 1 m | 105 | dB(A) | FAA AC 36-1H |
-| L_src ROTORCRAFT | Source level at 1 m | 130 | dB(A) | Bell 212 flyover back-calculation |
-| α | Atmospheric absorption | 0.005 | dB/m | ISO 9613-2:1996 Table B.1 |
-| r_ref | Reference distance | 1 | m | convention |
-| Earth radius | WGS-84 mean | 6,371,008.7714 | m | IUGG 1980 |
-
-Full constants table with inline citations lives in [`src/lib/acoustics.ts`](./src/lib/acoustics.ts).
-
-### Worked example
-
-A Boeing 737 (category `LARGE`, L_src = 135 dB) directly overhead at 3,000 ft:
-
-- altitude = 914 m → r_slant = 914 m
-- geometric loss: `20·log₁₀(914) ≈ 59.2 dB`
-- atmospheric loss: `0.005 × 914 ≈ 4.6 dB`
-- **L_observed ≈ 135 − 59.2 − 4.6 = 71.2 dB** — roughly the volume of a vacuum cleaner in the next room.
-
-A 747 at the same geometry lands at ~76 dB. A Cessna 172 at 1,500 ft lands at ~46 dB — barely audible over suburban ambient. Those numbers match the informal "sounded like a mid-size jet at a few thousand feet" estimates most people make.
-
-### What this model deliberately does not do
-
-- No ground reflection (can add up to 3 dB at a standing listener).
-- No directivity. Modern turbofans radiate more forward than aft during climb; we treat every source as omnidirectional.
-- No thrust modulation. Climb is louder than cruise; we use one L_src per category.
-- No per-frequency absorption. ISO 9613-2 varies α from 0.1 dB/km at 63 Hz to 80+ dB/km at 8 kHz.
-- No weather integration. We assume still air at 10 °C / 60 % RH.
-
-The model is for distinguishing a 747 from a Cessna at a glance, not for replacing a certified noise measurement.
-
-## Architecture
-
-```
- ┌──────────────┐  fetch OpenSky every 10s based on map bbox
- │   browser    │ ──────────────────────────────────▶ OpenSky REST
- │ (main thread)│                                          │
- └──────┬───────┘                                          │
-        │  render: MapLibre GL + pooled DOM markers        │
-        │  animate: rAF @ 10 Hz dead-reckoning             │
-        │                                                  │
-        │  if home is set:                                 │
-        │     new Worker(skyPoller.worker.ts)              │
-        │         │                                        │
-        │         │ fetch own bbox + acoustics calcs       │
-        │         │ Dexie bulk put                         │
-        │         ▼                                        │
-        │     IndexedDB (passes, cached metadata)          │
-        │                                                  │
-        │  TLE propagation:                                │
-        │     satellite.js SGP4 in main thread             │
-        │     cache Celestrak TLEs in localStorage (6h)    │
-        ▼
-   Zustand store · React rendering
-```
-
-The poller worker and the live-map poller are independent. The worker owns the ground truth for historical passes; the live map is a live-view with no persistence.
-
-## Run locally
+## 🛠️ Development
 
 ```bash
-pnpm install       # ~10s
-pnpm build:data    # optional; enriches detail panel with aircraft type / operator
-pnpm dev           # http://localhost:5173
+pnpm install
+pnpm dev          # vite dev server on :5173
+pnpm typecheck    # tsc -b --noEmit
+pnpm test         # 101 unit tests
+pnpm build        # production build
+pnpm preview      # serve the production build
+pnpm build:data   # optional: pre-fetch OpenSky aircraft DB for richer detail panel
 ```
 
-Production build:
+Strict TypeScript throughout, no `any`. Coverage focuses on `src/lib/` (geo math, acoustics, callsign parsing, dead-reckoning, sightings).
 
-```bash
-pnpm build
-pnpm preview
-```
+---
 
-Tests:
+## 🗺️ Roadmap
 
-```bash
-pnpm test
-```
+These are open issues — PRs welcome:
 
-There are 83 unit tests across `geo`, `acoustics`, `opensky`, `callsign`, `units`, and `deadReckon`. Coverage focuses on the physics and decoding layers.
+- [ ] Mobile installable PWA + offline support
+- [ ] Time-machine: scrub backward through the last few minutes
+- [ ] Webhook notifications (Discord, Slack) for tracked flights
+- [ ] Public "share your sky" URL with stats
+- [ ] Pluggable data sources (OpenSky direct via reverse proxy, ADS-B Exchange API)
+- [ ] Plane fact cards (Wikipedia / aviation-trivia integration)
+- [ ] Multi-home support
+- [ ] Light theme
 
-## Deployment
+See [issues with the `good-first-issue` label](https://github.com/vnmoorthy/Skylog/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) for places to start contributing.
 
-The `main` branch deploys to GitHub Pages automatically on push. See `.github/workflows/deploy.yml`. The Vite build sets `base` to `/Skylog/` only for production, so local dev continues to work from `/`.
+---
 
-## Limitations
+## 🤝 Contributing
 
-- **ADS-B coverage isn't perfect.** Most commercial traffic transmits, but some general-aviation aircraft and all military traffic don't. OpenSky's coverage has gaps over ocean and remote regions.
-- **OpenSky anonymous limits.** 400 credits/day. Skylog skips polls when the bbox would cost ≥3 credits (roughly, when you're zoomed out past country scale).
-- **72-hour rolling buffer.** Older passes drop. The 50 MB IndexedDB ceiling triggers a 20% prune when crossed.
-- **Single location.** v0.2 tracks one home at a time.
-- **Simplified loudness.** See "what this model deliberately does not do" above.
+PRs welcome. Read [CONTRIBUTING.md](./CONTRIBUTING.md) first. The codebase is small and well-tested — adding a feature or fixing a bug should be straightforward.
 
-## Stack
+---
 
-Vite · React 18 · TypeScript strict · Tailwind · Zustand · Dexie · MapLibre GL · D3 scales · satellite.js · Web Worker for pass logging.
+## 📜 License
 
-## License
+[MIT](./LICENSE). Use it for whatever you want.
 
-MIT. See [`LICENSE`](./LICENSE).
+---
 
-## Acknowledgements
+## 🙏 Acknowledgements
 
-- [airplanes.live](https://airplanes.live/) — the CORS-friendly live ADS-B feed.
-- [OpenSky Network](https://opensky-network.org/) — historical pass-logger feed and the aircraft metadata DB.
-- [Celestrak](https://celestrak.org/) — satellite TLEs.
-- [CARTO](https://carto.com/) — dark basemap tiles.
-- [MapLibre](https://maplibre.org/) — open map renderer.
-- [satellite.js](https://github.com/shashwatak/satellite-js) — SGP4 port.
-- [OurAirports](https://ourairports.com/) — airport metadata (public domain).
-- [Dexie](https://dexie.org/) — IndexedDB wrapper.
+Skylog stands on the shoulders of:
+
+- [airplanes.live](https://airplanes.live/) — the live ADS-B feed
+- [OpenSky Network](https://opensky-network.org/) — aircraft metadata DB
+- [Celestrak](https://celestrak.org/) — satellite TLE feed
+- [CARTO](https://carto.com/) — dark basemap
+- [MapLibre GL](https://maplibre.org/) — the open-source vector map renderer
+- [satellite.js](https://github.com/shashwatak/satellite-js) — SGP4 orbital propagator
+- [Dexie](https://dexie.org/) — wonderful IndexedDB wrapper
+
+---
+
+<div align="center">
+
+**Built because I wanted to know which plane keeps waking me up at 3 AM.**
+
+If Skylog is useful to you, **⭐ star this repo** so others find it.
+
+</div>
