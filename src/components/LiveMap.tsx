@@ -159,7 +159,7 @@ export const LiveMap = forwardRef<LiveMapHandle, LiveMapProps>(function LiveMap(
 
     const initialCenter: [number, number] = home
       ? [home.lon, home.lat]
-      : [-73.985, 40.75]; // NYC — always busy.
+      : [-0.1276, 51.5074]; // London — prime meridian, busiest corridor.
     const initialZoom = home ? 9 : 8;
 
     const map = new maplibregl.Map({
@@ -322,7 +322,7 @@ export const LiveMap = forwardRef<LiveMapHandle, LiveMapProps>(function LiveMap(
   /* -------------------- silent geolocation fly-to -------------------- */
   // If the user has no home set, try a passive geolocation request. If the
   // browser grants it, fly the map to the user so they immediately see
-  // their local airspace. If denied, we stay at the NYC default. This is
+  // their local airspace. If denied, we stay at the London default. This is
   // strictly UX-only — it does not set a home.
   useEffect(() => {
     if (home) return;
