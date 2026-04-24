@@ -160,7 +160,7 @@ export const LiveMap = forwardRef<LiveMapHandle, LiveMapProps>(function LiveMap(
     const initialCenter: [number, number] = home
       ? [home.lon, home.lat]
       : [-73.985, 40.75]; // NYC — always busy.
-    const initialZoom = home ? 9 : 6;
+    const initialZoom = home ? 9 : 8;
 
     const map = new maplibregl.Map({
       container: container.current,
@@ -193,7 +193,14 @@ export const LiveMap = forwardRef<LiveMapHandle, LiveMapProps>(function LiveMap(
       m.triggerRepaint();
     };
     const bootPoll = setInterval(kickMap, 100);
-    const stopBootPoll = setTimeout(() => clearInterval(bootPoll), 12_000);
+    const stopBootPoll = setTimeout(() => {
+      clearInterval(bootPoll);
+      // Lock in the intended viewport — the rapid resizes during boot
+      // sometimes drift the camera, leaving the user zoomed out past
+      // the live-feed's bbox cap.
+      const m = mapRef.current;
+      if (m) m.jumpTo({ center: initialCenter, zoom: initialZoom });
+    }, 12_000);
     const onSourceData = (): void => {
       // First basemap tile arrival — flush a resize in case the
       // canvas was mis-sized when the map first rendered.
