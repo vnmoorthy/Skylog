@@ -1,12 +1,13 @@
 /**
- * SKYLOG — compact overlay card shown when a user clicks a live plane
- * on the map.
+ * SKYLOG — click-a-plane live flight card.
  *
- * This is separate from the historical pass DetailPanel (which shows a
- * pass with altitude curves and closest-approach stats) because live
- * aircraft don't have an end-of-pass yet. The card shows the snapshot
- * we know right now and resolves the aircraft registration/type/airline
- * asynchronously against the bundled DB.
+ * Shown in the top-right when a user clicks an aircraft glyph. Presents
+ * everything we can know from a single OpenSky state vector and the
+ * bundled aircraft metadata DB.
+ *
+ * Separate from DetailPanel (which is for completed historical passes)
+ * because live flights haven't ended yet — no closest-approach point,
+ * no pass duration.
  */
 
 import { useEffect, useState } from "react";
@@ -16,8 +17,10 @@ import {
   formatAltitude,
   formatClock,
   formatSpeed,
+  type UnitSystem,
 } from "../lib/units";
 import { lookupAircraft, type AircraftInfo } from "../lib/aircraftDb";
+import { haversineMeters } from "../lib/geo";
 import { useSky } from "../state/store";
 
 interface FlightCardProps {
@@ -26,7 +29,8 @@ interface FlightCardProps {
 }
 
 export function FlightCard({ state, onClose }: FlightCardProps): JSX.Element {
-  const units = useSky((s) => s.units);
+  const units = useSky((s) => s.units) as UnitSystem;
+  const home = useSky((s) => s.home);
   const [ac, setAc] = useState<AircraftInfo | null>(null);
 
   useEffect(() => {
@@ -45,7 +49,7 @@ export function FlightCard({ state, onClose }: FlightCardProps): JSX.Element {
   }, [state.icao24]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
+    const onKey = (e: KeyboardEvent): void => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
@@ -55,42 +59,53 @@ export function FlightCard({ state, onClose }: FlightCardProps): JSX.Element {
   const parsed = parseCallsign(state.callsign);
   const title = prettyFlightName(parsed);
 
+  const distanceFromHome =
+    home && state.latitude != null && state.longitude != null
+      ? haversineMeters(home, { lat: state.latitude, lon: state.longitude })
+      : null;
+
+  const verticalRateFtMin =
+    state.verticalRateMps != null
+      ? Math.round(state.verticalRateMps * 196.85)
+      : null;
+
   return (
     <aside
-      className="fixed right-4 top-4 z-30 w-[340px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-md border border-ink-800 bg-ink-900/95 shadow-2xl backdrop-blur"
+      className="pointer-events-auto fixed right-4 top-20 z-30 w-[340px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-md border border-ink-800 bg-ink-900/95 shadow-2xl backdrop-blur"
       role="dialog"
-      aria-label="Live flight"
+      aria-label={`Flight ${title}`}
     >
       <header className="flex items-start justify-between gap-3 border-b border-ink-800 px-4 py-3">
-        <div>
+        <div className="min-w-0">
           <p className="font-mono text-[10px] uppercase tracking-wider text-ink-500">
             {parsed.airlineIcao ?? state.icao24.toUpperCase()}
-            {state.callsign && state.callsign.trim() !== parsed.airlineIcao
+            {state.callsign && state.callsign.trim() && state.callsign.trim() !== parsed.airlineIcao
               ? ` · ${state.callsign.trim()}`
               : ""}
           </p>
-          <h3 className="mt-0.5 text-lg font-semibold text-ink-100">{title}</h3>
-          {state._aircraftDesc || ac ? (
+          <h3 className="mt-0.5 truncate text-lg font-semibold text-ink-100">
+            {title}
+          </h3>
+          {ac ? (
             <p className="mt-1 text-xs text-ink-300">
-              {state._aircraftDesc ?? `${ac?.manufacturer ? ac.manufacturer + " " : ""}${ac?.model ?? ac?.typecode ?? "Unknown type"}`}
-              {state._registration
-                ? ` · ${state._registration}`
-                : ac?.registration
-                ? ` · ${ac.registration}`
-                : ""}
+              {ac.manufacturer ? `${ac.manufacturer} ` : ""}
+              {ac.model ?? ac.typecode ?? "Unknown type"}
+              {ac.registration ? ` · ${ac.registration}` : ""}
             </p>
           ) : state.originCountry ? (
-            <p className="mt-1 text-xs text-ink-400">Registered {state.originCountry}</p>
-          ) : null}
-          {state._operator ? (
-            <p className="text-xs text-ink-400">{state._operator}</p>
-          ) : ac?.operator ? (
+            <p className="mt-1 text-xs text-ink-400">
+              Registered in {state.originCountry}
+            </p>
+          ) : (
+            <p className="mt-1 text-xs text-ink-500">Looking up aircraft…</p>
+          )}
+          {ac?.operator ? (
             <p className="text-xs text-ink-400">{ac.operator}</p>
           ) : null}
         </div>
         <button
           onClick={onClose}
-          className="font-mono text-[11px] text-ink-400 hover:text-accent"
+          className="shrink-0 font-mono text-[11px] text-ink-400 hover:text-accent"
           aria-label="Close"
         >
           ESC ×
@@ -102,22 +117,37 @@ export function FlightCard({ state, onClose }: FlightCardProps): JSX.Element {
         </Stat>
         <Stat label="Ground speed">{formatSpeed(state.velocityMps, units)}</Stat>
         <Stat label="Heading">
-          {state.trackDeg != null ? `${Math.round(state.trackDeg)}°` : "—"}
+          {state.trackDeg != null
+            ? `${Math.round(state.trackDeg)}° ${compassPoint(state.trackDeg)}`
+            : "—"}
         </Stat>
         <Stat label="Vertical rate">
-          {state.verticalRateMps != null
-            ? `${state.verticalRateMps >= 0 ? "↑" : "↓"} ${Math.abs(
-                Math.round(state.verticalRateMps * 196.85) // m/s → ft/min
-              )} ft/min`
-            : "level"}
+          {verticalRateFtMin == null
+            ? "level"
+            : verticalRateFtMin === 0
+            ? "level"
+            : `${verticalRateFtMin > 0 ? "↑" : "↓"} ${Math.abs(
+                verticalRateFtMin
+              ).toLocaleString()} ft/min`}
         </Stat>
+        {distanceFromHome != null && (
+          <Stat label="Distance from home">
+            {formatDistanceShort(distanceFromHome, units)}
+          </Stat>
+        )}
         <Stat label="Last contact">
           {state.lastContact ? formatClock(state.lastContact * 1000) : "—"}
         </Stat>
-        <Stat label="Squawk">{state.squawk ?? "—"}</Stat>
+        <Stat label="Squawk">
+          <span className={squawkClass(state.squawk)}>{state.squawk ?? "—"}</span>
+        </Stat>
+        <Stat label="Status">
+          {state.onGround ? "on ground" : state.spi ? "special" : "airborne"}
+        </Stat>
       </section>
       <footer className="border-t border-ink-800 px-4 py-2 font-mono text-[10px] uppercase tracking-wider text-ink-500">
-        icao24 {state.icao24} · on-ground {state.onGround ? "yes" : "no"}
+        icao24 {state.icao24}
+        {state.positionSource != null && ` · src ${posSourceLabel(state.positionSource)}`}
       </footer>
     </aside>
   );
@@ -138,4 +168,43 @@ function Stat({
       <p className="mt-0.5 font-mono tabular-nums text-sm text-ink-100">{children}</p>
     </div>
   );
+}
+
+function compassPoint(deg: number): string {
+  const points = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+  const idx = Math.round(((deg % 360) / 45) % 8);
+  return points[(idx + 8) % 8]!;
+}
+
+function formatDistanceShort(meters: number, units: UnitSystem): string {
+  if (units === "imperial") {
+    const mi = meters / 1609.344;
+    return mi < 0.1
+      ? `${Math.round(meters * 3.28084)} ft`
+      : `${mi.toFixed(mi < 10 ? 1 : 0)} mi`;
+  }
+  if (meters < 1_000) return `${Math.round(meters)} m`;
+  return `${(meters / 1_000).toFixed(meters < 10_000 ? 1 : 0)} km`;
+}
+
+function squawkClass(sq: string | null): string {
+  if (!sq) return "";
+  if (sq === "7500" || sq === "7600" || sq === "7700") return "text-accent";
+  return "";
+}
+
+function posSourceLabel(src: number): string {
+  // OpenSky's position_source enum.
+  switch (src) {
+    case 0:
+      return "ADS-B";
+    case 1:
+      return "ASTERIX";
+    case 2:
+      return "MLAT";
+    case 3:
+      return "FLARM";
+    default:
+      return `${src}`;
+  }
 }

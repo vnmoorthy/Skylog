@@ -1,185 +1,183 @@
 /**
- * SKYLOG — full-screen live aircraft map.
+ * SKYLOG — full-screen live aircraft map (hero component).
  *
- * Hero component. Renders a MapLibre map that fills the viewport and
- * decorates it with:
- *   - Every ADS-B-equipped aircraft currently in the map's bbox, polled
- *     from OpenSky every 10 s. Each aircraft is a rotated plane glyph,
- *     tinted by altitude, with a trailing line segment showing its
- *     recent path.
- *   - Named satellites (ISS etc.) propagated client-side from Celestrak
- *     TLEs, refreshed once per second.
- *   - Optional home marker + radius ring if the user has set one.
- *   - An altitude legend the user can use to read the colour ramp.
- *
- * Map style is CartoDB's "dark_all" raster — free, reliably hosted,
- * and looks significantly better than MapLibre's demo tiles. We damp
- * the raster a little with low opacity so our overlays stay readable.
- *
- * The map drives the poller: when the user pans or zooms, the next
- * poll uses the new bbox. That turns the app into a "telescope" the
- * user can sweep rather than a fixed dashboard.
+ * What it does:
+ *   1. Boots a MapLibre GL map with a dark OSM raster basemap (Mapbox-
+ *      style dark aesthetic, no access token needed).
+ *   2. Spins up a viewport-bound OpenSky poller; when the user pans or
+ *      zooms, the next poll reflects the new bbox.
+ *   3. For every aircraft returned, maintains a pooled DOM-marker that
+ *      holds a rotated SVG plane, tinted by altitude.
+ *   4. Runs a 10 Hz requestAnimationFrame loop that dead-reckons each
+ *      marker between polls using velocity + track, so the planes move
+ *      smoothly instead of teleporting every 10 s.
+ *   5. Renders short (~60 s) trails behind each aircraft via a single
+ *      GeoJSON source + line layer.
+ *   6. Draws the user's home marker + radius ring (if set).
+ *   7. Optionally overlays satellites (ISS etc.) propagated client-side
+ *      from Celestrak TLEs.
+ *   8. Click a plane → hands the StateVector up to App for the detail
+ *      card. Click the map background → clears selection.
+ *   9. Broadcasts aircraft lists upward for the list panel + overhead
+ *      indicator to consume.
  */
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, {
   Map as MlMap,
   Marker as MlMarker,
-  StyleSpecification,
 } from "maplibre-gl";
 import { startLivePoller, type LivePollStatus } from "../lib/livePoller";
+import type { BBox } from "../lib/geo";
 import type { StateVector } from "../lib/opensky";
 import {
   fetchSatellites,
   propagateAll,
+  groundTrack,
+  type ParsedSat,
   type SatPosition,
 } from "../lib/satellites";
+import { extrapolate } from "../lib/deadReckon";
 import { useSky } from "../state/store";
 
-/**
- * Pale-yellow → orange → red altitude ramp with a distinct "on ground"
- * tone. We match the rest of the SKYLOG palette so the plane markers
- * feel connected to the timeline colour legend.
- */
-export const ALT_COLORS: { band: [number, number]; color: string; label: string }[] = [
-  { band: [-500, 1_500], color: "#fde68a", label: "< 1,500 ft" },
-  { band: [1_500, 5_000], color: "#fbbf77", label: "1.5k–5k" },
-  { band: [5_000, 15_000], color: "#ff8a4c", label: "5k–15k" },
-  { band: [15_000, 30_000], color: "#ff5a24", label: "15k–30k" },
-  { band: [30_000, 80_000], color: "#c13a1a", label: "> 30k" },
-];
-
-function altitudeColor(altM: number | null): string {
-  const ft = altM == null ? 0 : altM * 3.28084;
-  for (const b of ALT_COLORS) if (ft >= b.band[0] && ft < b.band[1]) return b.color;
-  return ALT_COLORS[ALT_COLORS.length - 1]!.color;
-}
-
-/**
- * A compact, instantly legible plane silhouette pointing up. We rotate
- * the marker's DOM element to represent heading, so the SVG itself
- * always draws in its canonical "north" orientation.
- */
-const PLANE_SVG = (fill: string, selected: boolean): string => `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="22" height="22">
-  <defs>
-    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur stdDeviation="1.5" result="b"/>
-      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
-  </defs>
-  <path
-    filter="${selected ? "url(#glow)" : ""}"
-    fill="${fill}" stroke="#1a1a1f" stroke-width="1" stroke-linejoin="round"
-    d="M16 2 L19 14 L30 17 L30 20 L19 19 L18 27 L22 29 L22 30 L16 28 L10 30 L10 29 L14 27 L13 19 L2 20 L2 17 L13 14 Z"/>
-</svg>`;
-
-const SAT_SVG = `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="26" height="26">
-  <g fill="none" stroke="#9ad4ff" stroke-width="1.5" stroke-linejoin="round">
-    <rect x="13" y="13" width="6" height="6" fill="#9ad4ff"/>
-    <path d="M13 16 L3 11 M13 16 L3 21 M19 16 L29 11 M19 16 L29 21"/>
-  </g>
-  <circle cx="16" cy="16" r="1.5" fill="#1a1a1f"/>
-</svg>`;
-
-/**
- * Minimal raster-only dark basemap. CartoDB `dark_all` OSM tiles at 2x
- * (retina-friendly), a solid near-black background under them so tile
- * fade-in doesn't flash white, and nothing else — we keep the style
- * deliberately tiny so style-parsing can't silently fail in prod.
- */
-const STYLE_DARK: StyleSpecification = {
-  version: 8,
-  sources: {
-    basemap: {
-      type: "raster",
-      tiles: [
-        "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-        "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-        "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-        "https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-      ],
-      tileSize: 256,
-      attribution:
-        '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> contributors, &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    },
-  },
-  layers: [
-    {
-      id: "background",
-      type: "background",
-      paint: { "background-color": "#0a0a0b" },
-    },
-    {
-      id: "basemap",
-      type: "raster",
-      source: "basemap",
-    },
-  ],
-};
-
 interface LiveMapProps {
-  onSelectAircraft: (s: StateVector) => void;
+  onSelectAircraft: (s: StateVector | null) => void;
   selectedIcao24: string | null;
   showSatellites: boolean;
-  focusIcao24: string | null;
-  aircraftOut: (s: StateVector[]) => void;
+  onAircraftListChange: (list: readonly StateVector[]) => void;
 }
 
 interface PlaneMarkerRef {
   marker: MlMarker;
   iconEl: HTMLDivElement;
-  latestState: StateVector;
-  trail: { lon: number; lat: number; t: number }[];
-  lastLonLat: [number, number];
+  state: StateVector;
+  anchorAt: number;
+  trail: Array<[number, number]>; // [lon, lat]
 }
+
+interface SatMarkerRef {
+  marker: MlMarker;
+  iconEl: HTMLDivElement;
+}
+
+/* -------------------- visual constants -------------------- */
+
+const DARK_STYLE: maplibregl.StyleSpecification = {
+  version: 8,
+  glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+  sources: {
+    // CARTO's "dark matter (no labels)" basemap — free, CORS-safe, designed for this
+    // exact use case (data viz over geography). We'll overlay our own sparse
+    // labels via MapLibre's symbol layer later if we ever need them.
+    carto: {
+      type: "raster",
+      tiles: [
+        "https://a.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}@2x.png",
+        "https://b.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}@2x.png",
+        "https://c.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}@2x.png",
+        "https://d.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}@2x.png",
+      ],
+      tileSize: 256,
+      attribution:
+        "© <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors © <a href=\"https://carto.com/attributions\">CARTO</a>",
+    },
+    // Carto's label-only layer, so we can mix "dark + labels" nicely.
+    cartoLabels: {
+      type: "raster",
+      tiles: [
+        "https://a.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}@2x.png",
+        "https://b.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}@2x.png",
+        "https://c.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}@2x.png",
+        "https://d.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}@2x.png",
+      ],
+      tileSize: 256,
+    },
+  },
+  layers: [
+    { id: "bg", type: "background", paint: { "background-color": "#0a0a0b" } },
+    {
+      id: "basemap",
+      type: "raster",
+      source: "carto",
+      paint: {
+        "raster-opacity": 0.82,
+        "raster-saturation": -0.05,
+        "raster-contrast": 0.08,
+      },
+    },
+    {
+      id: "basemap-labels",
+      type: "raster",
+      source: "cartoLabels",
+      paint: {
+        "raster-opacity": 0.65,
+      },
+    },
+  ],
+};
+
+const PLANE_SVG = (fill: string): string =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="22" height="22" aria-hidden="true">
+     <path fill="${fill}" stroke="#06060a" stroke-width="1.1" stroke-linejoin="round"
+           d="M16 2 L19 14 L30 17 L30 20 L19 19 L18 27 L22 29 L22 30 L16 28 L10 30 L10 29 L14 27 L13 19 L2 20 L2 17 L13 14 Z"/>
+   </svg>`;
+
+const SAT_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="22" height="22" aria-hidden="true">
+  <g fill="none" stroke="#9ad4ff" stroke-width="1.6" stroke-linejoin="round">
+    <rect x="13" y="13" width="6" height="6" fill="#9ad4ff"/>
+    <path d="M13 16 L4 12 M13 16 L4 20 M19 16 L28 12 M19 16 L28 20"/>
+  </g>
+  <circle cx="16" cy="16" r="1.5" fill="#06060a"/>
+</svg>`;
+
+/** Altitude → colour ramp. Cool for taxiing / low, warm for cruise. */
+function altitudeColor(altM: number | null): string {
+  const ft = altM == null ? 0 : altM * 3.28084;
+  if (ft < 500) return "#9ad4ff";
+  if (ft < 2_500) return "#fbbf77";
+  if (ft < 10_000) return "#ffa357";
+  if (ft < 20_000) return "#ff8a4c";
+  if (ft < 30_000) return "#ff6b35";
+  return "#ef4c24";
+}
+
+const HOVER_GLOW = "drop-shadow(0 0 6px rgba(255,138,76,0.8))";
+const BASE_GLOW = "drop-shadow(0 1px 2px rgba(0,0,0,0.55))";
+
+/* -------------------- component -------------------- */
 
 export function LiveMap({
   onSelectAircraft,
   selectedIcao24,
   showSatellites,
-  focusIcao24,
-  aircraftOut,
+  onAircraftListChange,
 }: LiveMapProps): JSX.Element {
   const container = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MlMap | null>(null);
   const markersRef = useRef<Map<string, PlaneMarkerRef>>(new Map());
-  const satMarkersRef = useRef<Map<string, MlMarker>>(new Map());
+  const satMarkersRef = useRef<Map<string, SatMarkerRef>>(new Map());
   const sourcesReady = useRef(false);
-  const selectedRef = useRef<string | null>(selectedIcao24);
+  const rafRef = useRef<number | null>(null);
 
   const home = useSky((s) => s.home);
   const radiusM = useSky((s) => s.radiusMeters);
 
   const [status, setStatus] = useState<LivePollStatus>({ kind: "loading" });
-  const [aircraftCount, setAircraftCount] = useState<number>(0);
-  const [satCount, setSatCount] = useState<number>(0);
+  const [aircraftCount, setAircraftCount] = useState(0);
+  const [satCount, setSatCount] = useState(0);
 
-  // keep selectedRef in sync so render loop can know the selection without restarting
-  useEffect(() => {
-    selectedRef.current = selectedIcao24;
-    // Re-style the currently-selected marker and the previously-selected one.
-    for (const [id, ref] of markersRef.current) {
-      const fill = altitudeColor(
-        ref.latestState.baroAltitudeM ?? ref.latestState.geoAltitudeM ?? 0
-      );
-      ref.iconEl.innerHTML = PLANE_SVG(fill, id === selectedIcao24);
-      ref.iconEl.style.transform = `rotate(${ref.latestState.trackDeg ?? 0}deg)`;
-      ref.iconEl.style.zIndex = id === selectedIcao24 ? "2" : "1";
-    }
-  }, [selectedIcao24]);
-
-  /* ------- boot map once ------- */
+  /* -------------------- boot map -------------------- */
   useEffect(() => {
     if (!container.current) return;
+
     const initialCenter: [number, number] = home
       ? [home.lon, home.lat]
-      : [-73.985, 40.75]; // Midtown NYC — always has planes overhead.
+      : [-73.985, 40.75]; // NYC — always busy.
     const initialZoom = home ? 9 : 7.5;
+
     const map = new maplibregl.Map({
       container: container.current,
-      style: STYLE_DARK,
+      style: DARK_STYLE,
       center: initialCenter,
       zoom: initialZoom,
       minZoom: 2,
@@ -187,37 +185,10 @@ export function LiveMap({
       attributionControl: { compact: true },
     });
     mapRef.current = map;
-    // Expose for devtools debugging.
-    (window as unknown as { __skylogMap?: MlMap }).__skylogMap = map;
-    // MapLibre occasionally latches onto a stale container size when
-    // mounted inside a React tree that re-lays out during hydration,
-    // leaving the WebGL canvas blank. For the first few seconds of the
-    // map's life we continually trigger a repaint — enough of those
-    // land on a frame where the tiles have loaded and the size is real.
-    // After that we rely on the natural moveend / sourcedata events.
-    const pollInterval = setInterval(() => {
-      const m = mapRef.current;
-      if (!m) return;
-      m.resize();
-      m.triggerRepaint();
-    }, 150);
-    const stopPoll = setTimeout(() => clearInterval(pollInterval), 4000);
-    // Also wire a ResizeObserver on the container so the map stays sharp
-    // when the browser window changes size.
-    const ro = new ResizeObserver(() => {
-      const m = mapRef.current;
-      if (!m) return;
-      m.resize();
-      m.triggerRepaint();
-    });
-    if (container.current) ro.observe(container.current);
-    map.on("error", (e) => {
-      // eslint-disable-next-line no-console
-      console.warn("maplibre error:", (e as { error?: { message?: string } }).error?.message ?? e);
-    });
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "top-right");
 
     map.on("load", () => {
+      // Trails: one GeoJSON source, one line layer.
       map.addSource("trails", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -228,18 +199,29 @@ export function LiveMap({
         source: "trails",
         paint: {
           "line-color": "#ff8a4c",
-          "line-opacity": [
-            "interpolate",
-            ["linear"],
-            ["get", "age"],
-            0,
-            0.75,
-            60,
-            0.05,
-          ],
-          "line-width": 1.3,
+          "line-opacity": 0.45,
+          "line-width": 1.1,
         },
       });
+
+      // Satellite ground-track preview (only populated when one is selected).
+      map.addSource("sat-track", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addLayer({
+        id: "sat-track",
+        type: "line",
+        source: "sat-track",
+        paint: {
+          "line-color": "#9ad4ff",
+          "line-opacity": 0.5,
+          "line-width": 1,
+          "line-dasharray": [1, 2],
+        },
+      });
+
+      // Home + radius ring.
       map.addSource("home-ring", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -250,164 +232,214 @@ export function LiveMap({
         source: "home-ring",
         paint: {
           "line-color": "#ff8a4c",
-          "line-dasharray": [2, 2],
-          "line-opacity": 0.55,
+          "line-opacity": 0.6,
           "line-width": 1,
+          "line-dasharray": [2, 2],
         },
       });
       map.addLayer({
         id: "home-dot",
         type: "circle",
         source: "home-ring",
-        filter: ["==", "$type", "Point"],
+        filter: ["==", ["geometry-type"], "Point"],
         paint: {
-          "circle-radius": 4,
-          "circle-color": "#ececef",
-          "circle-stroke-color": "#1a1a1f",
-          "circle-stroke-width": 1,
+          "circle-color": "#fafafa",
+          "circle-radius": 3.5,
+          "circle-stroke-color": "#ff8a4c",
+          "circle-stroke-width": 2,
         },
       });
+
       sourcesReady.current = true;
+      rebuildHomeRing();
+    });
+
+    map.on("click", () => {
+      onSelectAircraft(null);
     });
 
     return () => {
-      clearInterval(pollInterval);
-      clearTimeout(stopPoll);
-      ro.disconnect();
       map.remove();
       mapRef.current = null;
       markersRef.current.clear();
       satMarkersRef.current.clear();
       sourcesReady.current = false;
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ------- fly to a selected flight ------- */
+  /* -------------------- silent geolocation fly-to -------------------- */
+  // If the user has no home set, try a passive geolocation request. If the
+  // browser grants it, fly the map to the user so they immediately see
+  // their local airspace. If denied, we stay at the NYC default. This is
+  // strictly UX-only — it does not set a home.
   useEffect(() => {
-    if (!focusIcao24 || !mapRef.current) return;
-    const ref = markersRef.current.get(focusIcao24);
-    if (!ref) return;
-    mapRef.current.flyTo({
-      center: ref.lastLonLat,
-      zoom: Math.max(mapRef.current.getZoom(), 9),
-      duration: 900,
-    });
-  }, [focusIcao24]);
+    if (home) return;
+    if (typeof navigator === "undefined" || !navigator.geolocation) return;
+    let cancelled = false;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        if (cancelled) return;
+        const map = mapRef.current;
+        if (!map) return;
+        map.flyTo({
+          center: [pos.coords.longitude, pos.coords.latitude],
+          zoom: 9,
+          duration: 1_400,
+          essential: true,
+        });
+      },
+      () => {
+        /* denied or unavailable — stay on default */
+      },
+      { enableHighAccuracy: false, timeout: 6_000, maximumAge: 10 * 60_000 }
+    );
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  /* ------- poll OpenSky by current viewport ------- */
+  /* -------------------- poll OpenSky -------------------- */
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
-    const readBBox = () => {
+    const readBBox = (): BBox => {
       const b = map.getBounds();
       return {
         lamin: b.getSouth(),
-        lamax: b.getNorth(),
         lomin: b.getWest(),
+        lamax: b.getNorth(),
         lomax: b.getEast(),
       };
     };
 
-    const handleStates = (states: StateVector[]) => {
-      renderAircraft(
-        map,
-        markersRef.current,
-        states,
-        onSelectAircraft,
-        selectedRef,
-        sourcesReady
-      );
-      aircraftOut(states);
+    const handleStates = (states: StateVector[]): void => {
+      onAircraftListChange(states);
+      applyPoll(map, markersRef.current, states, onSelectAircraft);
+      setAircraftCount(states.length);
     };
 
-    const poller = startLivePoller(readBBox(), handleStates, (s) => {
-      setStatus(s);
-      if (s.kind === "ok") setAircraftCount(s.count);
-      if (s.kind === "empty" || s.kind === "too_wide") setAircraftCount(0);
-    });
-
-    const onMoveEnd = () => poller.updateBBox(readBBox());
+    const poller = startLivePoller(readBBox(), handleStates, setStatus);
+    const onMoveEnd = (): void => poller.updateBBox(readBBox());
     map.on("moveend", onMoveEnd);
 
     return () => {
       poller.stop();
       map.off("moveend", onMoveEnd);
     };
-  }, [onSelectAircraft, aircraftOut]);
+  }, [onSelectAircraft, onAircraftListChange]);
 
-  /* ------- propagate satellites every second ------- */
+  /* -------------------- animation loop -------------------- */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    let lastFrame = 0;
+    const step = (now: number): void => {
+      if (now - lastFrame > 100) {
+        lastFrame = now;
+        tickDeadReckoning(map, markersRef.current, sourcesReady, selectedIcao24);
+      }
+      rafRef.current = requestAnimationFrame(step);
+    };
+    rafRef.current = requestAnimationFrame(step);
+    return () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    };
+  }, [selectedIcao24]);
+
+  /* -------------------- satellites overlay -------------------- */
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     if (!showSatellites) {
-      for (const m of satMarkersRef.current.values()) m.remove();
+      for (const ref of satMarkersRef.current.values()) ref.marker.remove();
       satMarkersRef.current.clear();
       setSatCount(0);
+      clearSatTrack(map);
       return;
     }
     let cancelled = false;
-    let tles: Awaited<ReturnType<typeof fetchSatellites>> = [];
-    let interval: ReturnType<typeof setInterval> | null = null;
+    let sats: ParsedSat[] = [];
+    let selectedSatId: string | null = null;
+    let timer: ReturnType<typeof setInterval> | null = null;
 
     (async () => {
       try {
-        tles = await fetchSatellites("stations");
+        sats = await fetchSatellites("stations");
       } catch {
-        return; // Silently drop if Celestrak blocks the call; map still works.
+        return;
       }
       if (cancelled) return;
-      const tick = () => {
+      const tick = (): void => {
         if (cancelled) return;
-        const positions = propagateAll(tles, new Date());
-        renderSatellites(map, satMarkersRef.current, positions);
+        const positions = propagateAll(sats, new Date());
+        renderSatellites(
+          map,
+          satMarkersRef.current,
+          positions,
+          sats,
+          (satId) => {
+            selectedSatId = satId;
+            const selected = sats.find((s) => s.id === satId);
+            if (selected) drawSatTrack(map, selected);
+          }
+        );
+        if (selectedSatId) {
+          const sel = sats.find((s) => s.id === selectedSatId);
+          if (sel) drawSatTrack(map, sel);
+        }
         setSatCount(positions.length);
       };
       tick();
-      interval = setInterval(tick, 1000);
+      timer = setInterval(tick, 1000);
     })();
 
     return () => {
       cancelled = true;
-      if (interval) clearInterval(interval);
+      if (timer) clearInterval(timer);
     };
   }, [showSatellites]);
 
-  /* ------- draw home marker + radius ring when home changes ------- */
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !sourcesReady.current) return;
-    const src = map.getSource("home-ring") as maplibregl.GeoJSONSource | undefined;
-    if (!src) return;
-    if (!home) {
-      src.setData({ type: "FeatureCollection", features: [] });
-      return;
-    }
-    src.setData({
-      type: "FeatureCollection",
-      features: [
-        {
-          type: "Feature",
-          properties: {},
-          geometry: { type: "Point", coordinates: [home.lon, home.lat] },
-        },
-        {
-          type: "Feature",
-          properties: {},
-          geometry: {
-            type: "LineString",
-            coordinates: ringCoords(home.lat, home.lon, radiusM),
+  /* -------------------- home ring sync -------------------- */
+  const rebuildHomeRing = useMemo(() => {
+    return () => {
+      const map = mapRef.current;
+      if (!map || !sourcesReady.current) return;
+      const src = map.getSource("home-ring") as maplibregl.GeoJSONSource | undefined;
+      if (!src) return;
+      if (!home) {
+        src.setData({ type: "FeatureCollection", features: [] });
+        return;
+      }
+      src.setData({
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            properties: {},
+            geometry: { type: "Point", coordinates: [home.lon, home.lat] },
           },
-        },
-      ],
-    });
-  }, [home, radiusM, status]);
+          {
+            type: "Feature",
+            properties: {},
+            geometry: {
+              type: "LineString",
+              coordinates: ringCoords(home.lat, home.lon, radiusM),
+            },
+          },
+        ],
+      });
+    };
+  }, [home, radiusM]);
 
-  const toggleLegend = useCallback(() => {
-    /* reserved: toggling visibility could go here */
-  }, []);
+  useEffect(() => {
+    rebuildHomeRing();
+  }, [home, radiusM, status, rebuildHomeRing]);
 
+  /* -------------------- render -------------------- */
   return (
     <div className="absolute inset-0">
       <div ref={container} className="absolute inset-0" />
@@ -416,15 +448,14 @@ export function LiveMap({
         aircraftCount={aircraftCount}
         satCount={showSatellites ? satCount : null}
       />
-      <AltitudeLegend onToggle={toggleLegend} />
     </div>
   );
 }
 
-/* ---------- helpers ---------- */
+/* -------------------- pure helpers -------------------- */
 
-function ringCoords(lat: number, lon: number, radiusM: number): [number, number][] {
-  const coords: [number, number][] = [];
+function ringCoords(lat: number, lon: number, radiusM: number): Array<[number, number]> {
+  const coords: Array<[number, number]> = [];
   const n = 64;
   const R = 6_371_008.7714;
   const latRad = (lat * Math.PI) / 180;
@@ -445,52 +476,54 @@ function ringCoords(lat: number, lon: number, radiusM: number): [number, number]
   return coords;
 }
 
-function renderAircraft(
+function applyPoll(
   map: MlMap,
   markers: Map<string, PlaneMarkerRef>,
   states: StateVector[],
-  onSelect: (s: StateVector) => void,
-  selectedRef: React.MutableRefObject<string | null>,
-  sourcesReady: React.MutableRefObject<boolean>
+  onSelect: (s: StateVector | null) => void
 ): void {
   const seen = new Set<string>();
   const now = Date.now();
-
   for (const s of states) {
     if (s.latitude == null || s.longitude == null) continue;
     seen.add(s.icao24);
     const heading = s.trackDeg ?? 0;
     const color = altitudeColor(s.baroAltitudeM ?? s.geoAltitudeM ?? 0);
-    const selected = selectedRef.current === s.icao24;
-    const existing = markers.get(s.icao24);
+    const svg = PLANE_SVG(color);
 
+    const existing = markers.get(s.icao24);
     if (existing) {
-      existing.marker.setLngLat([s.longitude, s.latitude]);
-      existing.iconEl.innerHTML = PLANE_SVG(color, selected);
+      existing.iconEl.innerHTML = svg;
       existing.iconEl.style.transform = `rotate(${heading}deg)`;
-      existing.iconEl.style.zIndex = selected ? "2" : "1";
-      if (
-        existing.lastLonLat[0] !== s.longitude ||
-        existing.lastLonLat[1] !== s.latitude
-      ) {
-        existing.trail.push({ lon: s.longitude, lat: s.latitude, t: now });
-        if (existing.trail.length > 6) existing.trail.shift();
+      existing.marker.setLngLat([s.longitude, s.latitude]);
+      // Only push to trail when we moved meaningfully (>10 m roughly).
+      const last = existing.trail[existing.trail.length - 1];
+      if (!last || Math.hypot(last[0] - s.longitude, last[1] - s.latitude) > 0.0001) {
+        existing.trail.push([s.longitude, s.latitude]);
+        if (existing.trail.length > 8) existing.trail.shift();
       }
-      existing.latestState = s;
-      existing.lastLonLat = [s.longitude, s.latitude];
+      existing.state = s;
+      existing.anchorAt = now;
     } else {
       const iconEl = document.createElement("div");
-      iconEl.innerHTML = PLANE_SVG(color, selected);
+      iconEl.innerHTML = svg;
       iconEl.style.cssText = `
         width:22px;height:22px;cursor:pointer;
-        transition:transform 350ms linear;
+        transition:transform 400ms linear;
         transform:rotate(${heading}deg);
-        filter:drop-shadow(0 1px 2px rgba(0,0,0,0.5));
-        z-index:${selected ? 2 : 1};
+        filter:${BASE_GLOW};
       `;
+      iconEl.setAttribute("role", "button");
+      iconEl.setAttribute("aria-label", s.callsign?.trim() || s.icao24);
       iconEl.addEventListener("click", (ev) => {
         ev.stopPropagation();
         onSelect(s);
+      });
+      iconEl.addEventListener("mouseenter", () => {
+        iconEl.style.filter = `${BASE_GLOW} ${HOVER_GLOW}`;
+      });
+      iconEl.addEventListener("mouseleave", () => {
+        iconEl.style.filter = BASE_GLOW;
       });
       const marker = new maplibregl.Marker({ element: iconEl })
         .setLngLat([s.longitude, s.latitude])
@@ -498,13 +531,12 @@ function renderAircraft(
       markers.set(s.icao24, {
         marker,
         iconEl,
-        latestState: s,
-        trail: [{ lon: s.longitude, lat: s.latitude, t: now }],
-        lastLonLat: [s.longitude, s.latitude],
+        state: s,
+        anchorAt: now,
+        trail: [[s.longitude, s.latitude]],
       });
     }
   }
-
   // Remove stale markers.
   for (const [id, ref] of markers) {
     if (!seen.has(id)) {
@@ -512,29 +544,52 @@ function renderAircraft(
       markers.delete(id);
     }
   }
+}
 
-  // Rebuild trail geojson with per-segment age so the paint expression fades older segments.
-  if (sourcesReady.current) {
-    const features: GeoJSON.Feature[] = [];
-    for (const ref of markers.values()) {
-      if (ref.trail.length < 2) continue;
-      for (let i = 1; i < ref.trail.length; i++) {
-        const prev = ref.trail[i - 1]!;
-        const cur = ref.trail[i]!;
-        const ageSec = (now - cur.t) / 1000;
-        features.push({
-          type: "Feature",
-          properties: { age: ageSec },
-          geometry: {
-            type: "LineString",
-            coordinates: [
-              [prev.lon, prev.lat],
-              [cur.lon, cur.lat],
-            ],
-          },
-        });
-      }
+function tickDeadReckoning(
+  map: MlMap,
+  markers: Map<string, PlaneMarkerRef>,
+  sourcesReady: React.MutableRefObject<boolean>,
+  selectedIcao24: string | null
+): void {
+  const now = Date.now();
+  const features: GeoJSON.Feature[] = [];
+
+  for (const ref of markers.values()) {
+    const s = ref.state;
+    if (s.latitude == null || s.longitude == null) continue;
+    if (s.velocityMps != null && s.trackDeg != null && s.velocityMps > 0 && !s.onGround) {
+      const [newLat, newLon] = extrapolate(
+        {
+          lat: s.latitude,
+          lon: s.longitude,
+          speedMps: s.velocityMps,
+          trackDeg: s.trackDeg,
+          anchorAt: ref.anchorAt,
+        },
+        now
+      );
+      ref.marker.setLngLat([newLon, newLat]);
     }
+    // Highlight the selected plane.
+    const isSelected = selectedIcao24 != null && s.icao24 === selectedIcao24;
+    ref.iconEl.style.filter = isSelected
+      ? `${BASE_GLOW} ${HOVER_GLOW} drop-shadow(0 0 10px rgba(255,138,76,0.6))`
+      : BASE_GLOW;
+
+    if (ref.trail.length >= 2) {
+      features.push({
+        type: "Feature",
+        properties: {
+          icao24: s.icao24,
+          selected: isSelected,
+        },
+        geometry: { type: "LineString", coordinates: ref.trail },
+      });
+    }
+  }
+
+  if (sourcesReady.current) {
     const src = map.getSource("trails") as maplibregl.GeoJSONSource | undefined;
     src?.setData({ type: "FeatureCollection", features });
   }
@@ -542,36 +597,74 @@ function renderAircraft(
 
 function renderSatellites(
   map: MlMap,
-  markers: Map<string, MlMarker>,
-  positions: SatPosition[]
+  markers: Map<string, SatMarkerRef>,
+  positions: SatPosition[],
+  _sats: ParsedSat[],
+  onSelect: (satId: string) => void
 ): void {
   const seen = new Set<string>();
   for (const p of positions) {
     seen.add(p.id);
     const existing = markers.get(p.id);
     if (existing) {
-      existing.setLngLat([p.lon, p.lat]);
+      existing.marker.setLngLat([p.lon, p.lat]);
+      existing.iconEl.title = `${p.name} · ${Math.round(p.altKm)} km · ${p.speedKmS.toFixed(1)} km/s`;
     } else {
       const el = document.createElement("div");
       el.innerHTML = SAT_SVG;
       el.style.cssText = `
-        width:26px;height:26px;opacity:0.95;
-        filter:drop-shadow(0 0 8px rgba(154,212,255,0.35));
+        width:22px;height:22px;cursor:pointer;opacity:0.95;
+        filter:drop-shadow(0 0 7px rgba(154,212,255,0.45));
       `;
-      el.title = `${p.name} — ${Math.round(p.altKm)} km, ${p.speedKmS.toFixed(1)} km/s`;
-      const m = new maplibregl.Marker({ element: el })
+      el.title = `${p.name} · ${Math.round(p.altKm)} km · ${p.speedKmS.toFixed(1)} km/s`;
+      el.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        onSelect(p.id);
+      });
+      const marker = new maplibregl.Marker({ element: el })
         .setLngLat([p.lon, p.lat])
         .addTo(map);
-      markers.set(p.id, m);
+      markers.set(p.id, { marker, iconEl: el });
     }
   }
-  for (const [id, m] of markers) {
+  for (const [id, ref] of markers) {
     if (!seen.has(id)) {
-      m.remove();
+      ref.marker.remove();
       markers.delete(id);
     }
   }
 }
+
+function drawSatTrack(map: MlMap, sat: ParsedSat): void {
+  const now = Date.now();
+  const stepMs = 30_000;
+  const stepsAhead = 180; // 90 min
+  const past = groundTrack(sat, now - stepsAhead * stepMs, stepsAhead, stepMs);
+  const future = groundTrack(sat, now, stepsAhead, stepMs);
+  const src = map.getSource("sat-track") as maplibregl.GeoJSONSource | undefined;
+  src?.setData({
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        properties: { when: "past" },
+        geometry: { type: "LineString", coordinates: past },
+      },
+      {
+        type: "Feature",
+        properties: { when: "future" },
+        geometry: { type: "LineString", coordinates: future },
+      },
+    ],
+  });
+}
+
+function clearSatTrack(map: MlMap): void {
+  const src = map.getSource("sat-track") as maplibregl.GeoJSONSource | undefined;
+  src?.setData({ type: "FeatureCollection", features: [] });
+}
+
+/* -------------------- status badge -------------------- */
 
 function StatusBadge({
   status,
@@ -582,58 +675,67 @@ function StatusBadge({
   aircraftCount: number;
   satCount: number | null;
 }): JSX.Element {
-  const color =
-    status.kind === "rate_limited" || status.kind === "error"
+  const tone =
+    status.kind === "rate_limited" || status.kind === "error" || status.kind === "offline"
       ? "text-accent"
       : status.kind === "loading"
       ? "text-ink-400"
       : "text-ink-200";
-  const text =
-    status.kind === "loading"
-      ? "Loading aircraft…"
-      : status.kind === "ok"
-      ? `${aircraftCount} aircraft · live from airplanes.live`
-      : status.kind === "empty"
-      ? "No aircraft in view — try panning somewhere busy"
-      : status.kind === "too_wide"
-      ? "Zoom in to load aircraft"
-      : status.kind === "rate_limited"
-      ? "OpenSky rate-limited (anonymous quota) — retrying"
-      : status.kind === "offline"
-      ? "Offline"
-      : `OpenSky unreachable — ${status.message}. Will retry.`;
+
+  let text: string;
+  switch (status.kind) {
+    case "loading":
+      text = "Loading aircraft…";
+      break;
+    case "ok":
+      text = `${aircraftCount} aircraft in view`;
+      break;
+    case "empty":
+      text = "No aircraft in view — pan or zoom to busier airspace";
+      break;
+    case "too_wide":
+      text = "Zoom in to load aircraft";
+      break;
+    case "rate_limited":
+      text = "OpenSky rate-limited — retrying";
+      break;
+    case "offline":
+      text = "Offline";
+      break;
+    case "error":
+      text = `Error: ${status.message}`;
+      break;
+  }
 
   return (
-    <div className="pointer-events-none absolute left-4 bottom-16 z-10 flex flex-col gap-1">
-      <div className={`rounded bg-ink-900/85 px-3 py-2 font-mono text-xs backdrop-blur ${color}`}>
+    <div className="pointer-events-none absolute left-4 top-20 z-10 flex flex-col gap-1.5">
+      <div className={`rounded bg-ink-900/85 px-3 py-1.5 font-mono text-xs backdrop-blur ${tone}`}>
+        <span className="mr-2 inline-block h-1.5 w-1.5 rounded-full" style={{ background: dotColor(status.kind), boxShadow: `0 0 6px ${dotColor(status.kind)}`}} />
         {text}
       </div>
       {satCount != null && (
         <div className="rounded bg-ink-900/85 px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-[#9ad4ff] backdrop-blur">
-          {satCount} satellite{satCount === 1 ? "" : "s"} visible
+          {satCount} satellite{satCount === 1 ? "" : "s"}
         </div>
       )}
     </div>
   );
 }
 
-function AltitudeLegend({ onToggle: _onToggle }: { onToggle: () => void }): JSX.Element {
-  return (
-    <div className="pointer-events-none absolute bottom-4 left-4 z-10 rounded bg-ink-900/85 px-3 py-2 backdrop-blur">
-      <p className="mb-1 font-mono text-[9px] uppercase tracking-wider text-ink-500">
-        altitude
-      </p>
-      <div className="flex items-center gap-1.5">
-        {ALT_COLORS.map((b) => (
-          <div key={b.label} className="flex items-center gap-1">
-            <span
-              className="inline-block h-2 w-3 rounded-sm"
-              style={{ background: b.color }}
-            />
-            <span className="font-mono text-[9px] text-ink-400">{b.label}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+function dotColor(kind: LivePollStatus["kind"]): string {
+  switch (kind) {
+    case "ok":
+      return "#43e27a";
+    case "empty":
+      return "#8a8a96";
+    case "too_wide":
+      return "#fbbf77";
+    case "rate_limited":
+    case "error":
+    case "offline":
+      return "#ff4c24";
+    case "loading":
+    default:
+      return "#8a8a96";
+  }
 }

@@ -1,24 +1,30 @@
 /**
- * SKYLOG — live aircraft poller.
+ * SKYLOG — live OpenSky poller for the viewport-based map.
  *
- * Data source: the community-run airplanes.live v2 REST API. Unlike
- * OpenSky's anonymous REST endpoint, airplanes.live consistently emits
- * proper CORS headers for arbitrary web origins, so we can call it
- * directly from the browser without a proxy. The payload is also
- * richer: each aircraft arrives with its registration, aircraft type,
- * operator, and category pre-joined.
+ * Responsibilities:
+ *   - Poll OpenSky /states/all for whatever bbox the map is currently
+ *     showing, no more often than MIN_POLL_INTERVAL_MS (10 s).
+ *   - Skip polls whose bbox is so wide that a single call would cost ≥3
+ *     credits (OpenSky charges more for larger areas) — we cap area so
+ *     the 400 anonymous credits/day don't evaporate in minutes.
+ *   - Surface a discriminated-union status so the UI can render every
+ *     state meaningfully: loading, ok (N aircraft), empty, too_wide,
+ *     rate_limited (with retry-at), offline, error.
+ *   - Be cancellable: stop() cleans up timers and in-flight fetches.
  *
- * Strategy:
- *   - Poll every 10 s (matches the typical radar sweep cadence).
- *   - Query by (centre lat/lon, radius in nautical miles) — derived
- *     from the current map viewport. The API is happiest with queries
- *     up to a few hundred NM; we cap at 250 NM to stay fast.
- *   - Status transitions are dispatched to the caller so the UI can
- *     show "loading / ok / empty / error" without polling itself.
+ * This lives on the main thread because the bbox moves whenever the
+ * user pans/zooms. Pushing it into a worker would add IPC churn for
+ * every map interaction and buy us nothing.
  */
 
-import { haversineMeters, type BBox } from "./geo";
-import type { StateVector } from "./opensky";
+import {
+  MIN_POLL_INTERVAL_MS,
+  creditCost,
+  decodeStateRow,
+  statesUrl,
+  type StateVector,
+} from "./opensky";
+import type { BBox } from "./geo";
 
 export type LivePollStatus =
   | { kind: "loading" }
@@ -29,109 +35,20 @@ export type LivePollStatus =
   | { kind: "offline" }
   | { kind: "error"; message: string };
 
-export const POLL_INTERVAL_MS = 10_000;
-
-/** API caps queries at ~250 NM; we mirror that. Prevents accidental
- *  globe-wide fetches when the user zooms way out. */
-const MAX_RADIUS_NM = 250;
-const NM_PER_METER = 1 / 1852;
+/** Bbox area above which we decline to poll (OpenSky would charge 3–4 credits). */
+export const MAX_POLLED_AREA_SQ_DEG = 100;
 
 export interface LivePoller {
-  updateBBox: (bbox: BBox) => void;
-  stop: () => void;
+  /** Swap in a new bbox — takes effect at the next poll. */
+  readonly updateBBox: (bbox: BBox) => void;
+  /** Force an immediate poll (respecting MIN_POLL_INTERVAL_MS). */
+  readonly pokeNow: () => void;
+  /** Cancel all future polls and in-flight requests. */
+  readonly stop: () => void;
 }
 
-interface QueryCenter {
-  lat: number;
-  lon: number;
-  nm: number;
-}
-
-/** Derive (center, radius-NM) from a bounding box by taking the
- *  centroid and half the great-circle diagonal. */
-function bboxToCenter(b: BBox): QueryCenter {
-  const lat = (b.lamin + b.lamax) / 2;
-  const lon = (b.lomin + b.lomax) / 2;
-  const halfDiagM =
-    haversineMeters({ lat: b.lamin, lon: b.lomin }, { lat: b.lamax, lon: b.lomax }) /
-    2;
-  const nm = Math.min(Math.max(halfDiagM * NM_PER_METER, 25), MAX_RADIUS_NM);
-  return { lat, lon, nm };
-}
-
-/** airplanes.live payload shape (just the fields we use). */
-interface AlAircraft {
-  hex: string;
-  flight?: string;
-  r?: string;
-  t?: string;
-  desc?: string;
-  ownOp?: string;
-  lat?: number;
-  lon?: number;
-  alt_baro?: number | "ground";
-  alt_geom?: number;
-  gs?: number;
-  track?: number;
-  true_heading?: number;
-  mag_heading?: number;
-  baro_rate?: number;
-  geom_rate?: number;
-  squawk?: string;
-  category?: string;
-  seen?: number;
-  seen_pos?: number;
-  emergency?: string;
-}
-
-const FT_PER_M = 3.28084;
-const KNOTS_PER_MS = 1.943844;
-const FPM_PER_MS = 196.850394;
-
-function alToStateVector(a: AlAircraft, nowMs: number): StateVector | null {
-  if (a.lat == null || a.lon == null) return null;
-  const baroFt =
-    typeof a.alt_baro === "number" ? a.alt_baro : a.alt_baro === "ground" ? 0 : null;
-  const geoFt = a.alt_geom ?? null;
-  const heading = a.track ?? a.true_heading ?? a.mag_heading ?? null;
-  const verticalFpm = a.geom_rate ?? a.baro_rate ?? null;
-
-  return {
-    icao24: a.hex.toLowerCase(),
-    callsign: a.flight ? a.flight.trim() : null,
-    originCountry: null,
-    timePosition:
-      a.seen_pos != null ? Math.round(nowMs / 1000 - a.seen_pos) : null,
-    lastContact: Math.round(nowMs / 1000 - (a.seen ?? 0)),
-    longitude: a.lon,
-    latitude: a.lat,
-    baroAltitudeM: baroFt != null ? baroFt / FT_PER_M : null,
-    onGround: a.alt_baro === "ground",
-    velocityMps: a.gs != null ? a.gs / KNOTS_PER_MS : null,
-    trackDeg: heading,
-    verticalRateMps: verticalFpm != null ? verticalFpm / FPM_PER_MS : null,
-    geoAltitudeM: geoFt != null ? geoFt / FT_PER_M : null,
-    squawk: a.squawk ?? null,
-    spi: false,
-    positionSource: 0,
-    category: parseCategory(a.category),
-    _registration: a.r ?? null,
-    _typeCode: a.t ?? null,
-    _aircraftDesc: a.desc ?? null,
-    _operator: a.ownOp ?? null,
-  };
-}
-
-/** airplanes.live categories are "A0" through "A7" / "B0" etc; OpenSky
- * uses numeric 0–20. A1–A5 map to 2–6 (light → heavy jet). */
-function parseCategory(cat?: string): number | null {
-  if (!cat) return null;
-  if (cat.startsWith("A")) {
-    const n = Number(cat.slice(1));
-    if (Number.isFinite(n)) return n + 1;
-  }
-  return null;
-}
+const bboxArea = (b: BBox): number =>
+  Math.max(0, b.lamax - b.lamin) * Math.max(0, b.lomax - b.lomin);
 
 export function startLivePoller(
   initialBBox: BBox,
@@ -141,72 +58,95 @@ export function startLivePoller(
   let bbox = initialBBox;
   let cancelled = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let lastPollAt = 0;
+  let abort: AbortController | null = null;
 
   onStatus({ kind: "loading" });
 
-  const schedule = (ms: number = POLL_INTERVAL_MS): void => {
+  const poll = async (): Promise<void> => {
     if (cancelled) return;
-    timer = setTimeout(() => {
-      void tick();
-    }, ms);
-  };
+    lastPollAt = Date.now();
 
-  const tick = async (): Promise<void> => {
-    if (cancelled) return;
-    const center = bboxToCenter(bbox);
-    if (center.nm >= MAX_RADIUS_NM) {
+    if (bboxArea(bbox) > MAX_POLLED_AREA_SQ_DEG) {
       onStatus({ kind: "too_wide" });
-      schedule();
+      schedule(MIN_POLL_INTERVAL_MS);
       return;
     }
-    const url = `https://api.airplanes.live/v2/point/${center.lat.toFixed(4)}/${center.lon.toFixed(4)}/${Math.round(center.nm)}`;
+    // Informational — we aren't throttling by cost yet, but future
+    // versions may.
+    creditCost(bbox);
+
+    abort?.abort();
+    abort = new AbortController();
     try {
-      const res = await fetch(url, { headers: { Accept: "application/json" } });
+      const res = await fetch(statesUrl(bbox), {
+        headers: { Accept: "application/json" },
+        signal: abort.signal,
+      });
       if (cancelled) return;
       if (res.status === 429) {
-        const retryAfter = Number(res.headers.get("Retry-After") ?? "") || 30;
+        const retryAfter = Number(res.headers.get("Retry-After") ?? "") || 60;
         onStatus({ kind: "rate_limited", retryAt: Date.now() + retryAfter * 1000 });
         schedule(retryAfter * 1000);
         return;
       }
       if (!res.ok) {
         onStatus({ kind: "error", message: `HTTP ${res.status}` });
-        schedule();
+        schedule(MIN_POLL_INTERVAL_MS);
         return;
       }
-      const json = (await res.json()) as { ac?: AlAircraft[] };
+      const json = (await res.json()) as {
+        states: readonly (readonly unknown[])[] | null;
+      };
       if (cancelled) return;
-      const now = Date.now();
-      const states: StateVector[] = (json.ac ?? [])
-        .map((a) => alToStateVector(a, now))
-        .filter((s): s is StateVector => s !== null);
+      const states: StateVector[] = (json.states ?? [])
+        .map(decodeStateRow)
+        .filter(
+          (s): s is StateVector =>
+            s !== null && s.latitude !== null && s.longitude !== null
+        );
       onStates(states);
       onStatus(
         states.length > 0
           ? { kind: "ok", count: states.length, at: Date.now() }
           : { kind: "empty", at: Date.now() }
       );
-      schedule();
+      schedule(MIN_POLL_INTERVAL_MS);
     } catch (err) {
       if (cancelled) return;
+      if (err instanceof DOMException && err.name === "AbortError") return;
       onStatus({
-        kind:
-          typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "error",
+        kind: navigator.onLine ? "error" : "offline",
         message: err instanceof Error ? err.message : String(err),
       } as LivePollStatus);
-      schedule();
+      schedule(MIN_POLL_INTERVAL_MS);
     }
   };
 
-  void tick();
+  const schedule = (ms: number): void => {
+    if (cancelled) return;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      void poll();
+    }, ms);
+  };
+
+  // First poll: immediately.
+  void poll();
 
   return {
     updateBBox(next) {
       bbox = next;
     },
+    pokeNow() {
+      const elapsed = Date.now() - lastPollAt;
+      const wait = Math.max(0, MIN_POLL_INTERVAL_MS - elapsed);
+      schedule(wait);
+    },
     stop() {
       cancelled = true;
       if (timer) clearTimeout(timer);
+      abort?.abort();
     },
   };
 }

@@ -1,8 +1,9 @@
 /**
  * SKYLOG — floating top bar.
  *
- * Sits over the LiveMap. Hosts the brand, layer toggles, search input
- * slot, and drawer entry points (home, timeline, settings, help).
+ * Sits over LiveMap. Brand mark on the left, control cluster on the
+ * right. Keyboard shortcuts shown in tooltips so the app teaches itself
+ * over time.
  */
 
 import { useSky } from "../state/store";
@@ -12,8 +13,9 @@ interface TopBarProps {
   onToggleSatellites: () => void;
   onOpenHomeSetup: () => void;
   onOpenTimeline: () => void;
+  onOpenList: () => void;
+  listOpen: boolean;
   onOpenHelp: () => void;
-  children?: React.ReactNode;
 }
 
 export function TopBar({
@@ -21,43 +23,44 @@ export function TopBar({
   onToggleSatellites,
   onOpenHomeSetup,
   onOpenTimeline,
+  onOpenList,
+  listOpen,
   onOpenHelp,
-  children,
 }: TopBarProps): JSX.Element {
   const home = useSky((s) => s.home);
   const passCount = useSky((s) => Object.keys(s.passes).length);
   const setSettingsOpen = useSky((s) => s.setSettingsOpen);
 
   return (
-    <header className="pointer-events-none absolute left-0 right-0 top-0 z-20 flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+    <header className="pointer-events-none absolute inset-x-0 top-0 z-40 flex items-center justify-between px-4 py-3">
       <div className="pointer-events-auto flex items-center gap-3 rounded bg-ink-900/85 px-3 py-2 backdrop-blur">
         <div className="flex items-center gap-2">
-          <div className="h-2 w-2 rounded-full bg-accent" />
+          <div className="h-2 w-2 rounded-full bg-accent animate-pulse" />
           <span className="font-mono text-[11px] uppercase tracking-[0.25em] text-ink-100">
             skylog
           </span>
         </div>
-        <span className="hidden font-mono text-[9px] uppercase tracking-wider text-ink-500 sm:inline">
+        <span className="font-mono text-[9px] uppercase tracking-wider text-ink-500">
           live plane &amp; satellite tracker
         </span>
       </div>
 
-      <div className="pointer-events-auto flex flex-wrap items-center gap-2">
-        {children}
-        <nav className="flex items-center gap-1 rounded bg-ink-900/85 px-1.5 py-1 backdrop-blur">
-          <Btn onClick={onToggleSatellites} active={showSatellites}>
-            satellites
-          </Btn>
-          <Btn onClick={onOpenHomeSetup}>
-            {home ? "home" : "set home"}
-          </Btn>
-          <Btn onClick={onOpenTimeline} disabled={!home}>
-            timeline{passCount > 0 ? ` · ${passCount}` : ""}
-          </Btn>
-          <Btn onClick={() => setSettingsOpen(true)}>settings</Btn>
-          <Btn onClick={onOpenHelp}>?</Btn>
-        </nav>
-      </div>
+      <nav className="pointer-events-auto flex items-center gap-1 rounded bg-ink-900/85 px-1.5 py-1.5 backdrop-blur">
+        <Btn onClick={onToggleSatellites} active={showSatellites} shortcut="S">
+          satellites
+        </Btn>
+        <Btn onClick={onOpenList} active={listOpen} shortcut="L">
+          list
+        </Btn>
+        <Btn onClick={onOpenHomeSetup} shortcut="H">
+          {home ? "change home" : "set home"}
+        </Btn>
+        <Btn onClick={onOpenTimeline} disabled={!home} shortcut="T">
+          timeline{passCount > 0 ? ` (${passCount})` : ""}
+        </Btn>
+        <Btn onClick={onOpenHelp} shortcut="?">help</Btn>
+        <Btn onClick={() => setSettingsOpen(true)}>settings</Btn>
+      </nav>
     </header>
   );
 }
@@ -67,11 +70,13 @@ function Btn({
   children,
   active,
   disabled,
+  shortcut,
 }: {
   onClick: () => void;
   children: React.ReactNode;
   active?: boolean;
   disabled?: boolean;
+  shortcut?: string;
 }): JSX.Element {
   const base =
     "rounded px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider transition";
@@ -80,8 +85,9 @@ function Btn({
     : active
     ? `${base} bg-accent/20 text-accent`
     : `${base} text-ink-300 hover:text-ink-100 hover:bg-ink-800/80`;
+  const title = shortcut ? `shortcut: ${shortcut}` : undefined;
   return (
-    <button onClick={onClick} disabled={disabled} className={cls}>
+    <button onClick={onClick} disabled={disabled} className={cls} title={title}>
       {children}
     </button>
   );
