@@ -14,7 +14,12 @@ import { useEffect, useState } from "react";
 import {
   digestSummary,
   topFrequentVisitors,
+  regularVisitors,
+  busiestHour,
+  prettyPattern,
   type DigestSummary,
+  type RegularVisitor,
+  type HourOfDayStat,
 } from "../lib/sightings";
 import type { AircraftSighting } from "./../lib/db";
 import { parseCallsign, prettyFlightName } from "../lib/callsign";
@@ -30,14 +35,23 @@ export function MemoryDrawer({
 }: MemoryDrawerProps): JSX.Element {
   const [digest, setDigest] = useState<DigestSummary | null>(null);
   const [top, setTop] = useState<AircraftSighting[] | null>(null);
+  const [regulars, setRegulars] = useState<RegularVisitor[] | null>(null);
+  const [peakHour, setPeakHour] = useState<HourOfDayStat | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [d, t] = await Promise.all([digestSummary(), topFrequentVisitors(30)]);
+      const [d, topList, regs, bh] = await Promise.all([
+        digestSummary(),
+        topFrequentVisitors(30),
+        regularVisitors(8),
+        busiestHour(),
+      ]);
       if (cancelled) return;
       setDigest(d);
-      setTop(t);
+      setTop(topList);
+      setRegulars(regs);
+      setPeakHour(bh);
     })().catch(() => {
       /* non-fatal */
     });
@@ -103,9 +117,51 @@ export function MemoryDrawer({
         </div>
       </section>
 
+      {regulars && regulars.length > 0 && (
+        <section className="border-b border-ink-800 px-4 py-3">
+          <p className="font-mono text-[9px] uppercase tracking-widest text-accent">
+            regular visitors · patterns
+          </p>
+          <ul className="mt-2 space-y-1.5">
+            {regulars.map((r) => (
+              <li key={r.sighting.icao24}>
+                <button
+                  onClick={() => onSelectIcao24(r.sighting.icao24)}
+                  className="flex w-full items-baseline justify-between gap-2 rounded px-1 py-1 text-left hover:bg-ink-900"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate font-mono text-sm tabular-nums text-ink-100">
+                      {r.sighting.lastCallsign ?? r.sighting.icao24.toUpperCase()}
+                    </span>
+                    <span className="block font-mono text-[10px] text-ink-400">
+                      {prettyPattern(r.pattern)}
+                    </span>
+                  </span>
+                  <span className="shrink-0 font-mono text-[10px] text-accent">
+                    ×{r.pattern.count}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {peakHour && (
+        <section className="border-b border-ink-800 px-4 py-3 font-mono text-[10px] text-ink-400">
+          <span className="uppercase tracking-widest text-ink-500">
+            busiest hour ·{" "}
+          </span>
+          <span className="text-ink-100">
+            {peakHour.hour.toString().padStart(2, "0")}:00
+          </span>
+          <span className="text-ink-500"> · {peakHour.count} sightings</span>
+        </section>
+      )}
+
       <div className="flex-1 overflow-y-auto">
         <p className="px-4 py-3 font-mono text-[9px] uppercase tracking-widest text-ink-500">
-          regular visitors
+          all frequent visitors
         </p>
         {top == null ? (
           <p className="px-4 text-xs text-ink-500">Loading…</p>

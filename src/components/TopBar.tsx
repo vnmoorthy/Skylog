@@ -20,6 +20,8 @@ interface TopBarProps {
   onOpenMemory: () => void;
   memoryOpen: boolean;
   onPickRegion: (center: [number, number], zoom: number) => void;
+  onOpenTrack: () => void;
+  isTracking: boolean;
 }
 
 export function TopBar({
@@ -33,6 +35,8 @@ export function TopBar({
   onOpenMemory,
   memoryOpen,
   onPickRegion,
+  onOpenTrack,
+  isTracking,
 }: TopBarProps): JSX.Element {
   const home = useSky((s) => s.home);
   const passCount = useSky((s) => Object.keys(s.passes).length);
@@ -54,6 +58,9 @@ export function TopBar({
 
       <nav className="pointer-events-auto flex max-w-[85vw] items-center gap-1 overflow-x-auto rounded bg-ink-900/85 px-1.5 py-1.5 backdrop-blur">
         <RegionPicker onPick={onPickRegion} />
+        <Btn onClick={onOpenTrack} active={isTracking} shortcut="F">
+          {isTracking ? "tracking" : "track flight"}
+        </Btn>
         <Btn onClick={onOpenMemory} active={memoryOpen} shortcut="M">
           memory
         </Btn>

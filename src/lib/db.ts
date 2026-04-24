@@ -125,6 +125,13 @@ export interface AircraftSighting {
    * capped to the most recent 30 for a bounded footprint.
    */
   readonly recentDays: string;
+  /**
+   * Recent sighting timestamps (unix-ms), capped to the most recent 100.
+   * Used to detect patterns (same weekday+hour clusters = regular).
+   * Stored as a comma-separated string so Dexie can persist it without
+   * needing a blob column.
+   */
+  readonly recentTimes: string;
 }
 
 export interface MetaKV {
@@ -149,14 +156,28 @@ class SkylogDB extends Dexie {
       airports: "icao, iata",
       meta: "key",
     });
-    // Version 2: aircraft memory ("sightings"). Dexie auto-carries
-    // version-1 data forward because we only *add* a store.
+    // Version 2: aircraft memory ("sightings").
     this.version(2).stores({
       passes: "passId, icao24, firstSeen, lastSeen, closestApproachAt, peakDb",
       aircraft: "icao24",
       airports: "icao, iata",
       sightings: "icao24, lastSeenAt, sightingCount, dayCount",
       meta: "key",
+    });
+    // Version 3: add `recentTimes` on sightings — used for pattern
+    // detection (regular visitors, loudest hour, etc). Keep the same
+    // index set; the new field is just an extra property on each row
+    // so no schema migration function is needed.
+    this.version(3).stores({
+      passes: "passId, icao24, firstSeen, lastSeen, closestApproachAt, peakDb",
+      aircraft: "icao24",
+      airports: "icao, iata",
+      sightings: "icao24, lastSeenAt, sightingCount, dayCount",
+      meta: "key",
+    }).upgrade((tx) => {
+      return tx.table("sightings").toCollection().modify((row) => {
+        if (row.recentTimes == null) row.recentTimes = "";
+      });
     });
   }
 }

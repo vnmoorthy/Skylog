@@ -106,3 +106,72 @@ describe("mergeOne", () => {
     expect(rec!.recentDays.split(",").length).toBe(30);
   });
 });
+
+import { dominantPattern, decodeRecentTimes, prettyPattern } from "./sightings";
+
+describe("dominantPattern", () => {
+  it("returns null for <3 sightings", () => {
+    expect(dominantPattern([])).toBeNull();
+    expect(dominantPattern([Date.now()])).toBeNull();
+    expect(dominantPattern([Date.now(), Date.now() - 1000])).toBeNull();
+  });
+
+  it("detects a weekly pattern (same weekday+hour, 3+ weeks)", () => {
+    // Three Tuesdays at 7 AM local
+    const d1 = new Date(2026, 3, 7, 7, 15).getTime();  // Tue
+    const d2 = new Date(2026, 3, 14, 7, 20).getTime(); // Tue
+    const d3 = new Date(2026, 3, 21, 7, 5).getTime();  // Tue
+    const p = dominantPattern([d1, d2, d3]);
+    expect(p).not.toBeNull();
+    expect(p!.hour).toBe(7);
+    // Tue = 2
+    expect(p!.weekday).toBe(2);
+    expect(p!.count).toBe(3);
+  });
+
+  it("picks the most-common bucket when multiple exist", () => {
+    // Two Mondays at 9am, one Tuesday at 3pm, one random
+    const times = [
+      new Date(2026, 3, 6, 9, 0).getTime(),   // Mon 9
+      new Date(2026, 3, 13, 9, 15).getTime(), // Mon 9
+      new Date(2026, 3, 20, 9, 5).getTime(),  // Mon 9
+      new Date(2026, 3, 7, 15, 0).getTime(),  // Tue 15
+    ];
+    const p = dominantPattern(times);
+    expect(p!.hour).toBe(9);
+    expect(p!.weekday).toBe(1); // Mon
+    expect(p!.count).toBe(3);
+  });
+
+  it("returns null when nothing clusters ≥3", () => {
+    const times = [
+      new Date(2026, 3, 6, 9, 0).getTime(),
+      new Date(2026, 3, 13, 10, 0).getTime(),
+      new Date(2026, 3, 20, 11, 0).getTime(),
+    ];
+    expect(dominantPattern(times)).toBeNull();
+  });
+});
+
+describe("decodeRecentTimes", () => {
+  it("round-trips a simple CSV", () => {
+    expect(decodeRecentTimes("1,2,3")).toEqual([1, 2, 3]);
+  });
+  it("returns empty for empty input", () => {
+    expect(decodeRecentTimes("")).toEqual([]);
+  });
+  it("drops non-numeric entries", () => {
+    expect(decodeRecentTimes("1,foo,3")).toEqual([1, 3]);
+  });
+});
+
+describe("prettyPattern", () => {
+  it("formats weekday + hour nicely", () => {
+    expect(prettyPattern({ weekday: 2, hour: 7, count: 4 })).toBe(
+      "Tuesdays around 07:00"
+    );
+    expect(prettyPattern({ weekday: 0, hour: 22, count: 3 })).toBe(
+      "Sundays around 22:00"
+    );
+  });
+});

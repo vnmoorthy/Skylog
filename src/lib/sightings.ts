@@ -21,6 +21,7 @@ import type { StateVector } from "./opensky";
 
 const MAX_CALLSIGNS = 12;
 const MAX_RECENT_DAYS = 30;
+const MAX_RECENT_TIMES = 100;
 
 export interface RecordSightingsResult {
   readonly touched: number;
@@ -94,6 +95,14 @@ export function mergeOne(
       ? alt
       : Math.min(prev.minAltitudeM, alt);
 
+  const prevTimes = prev?.recentTimes
+    ? prev.recentTimes
+        .split(",")
+        .map((x) => Number(x))
+        .filter((x) => Number.isFinite(x))
+    : [];
+  const nextTimes = [now, ...prevTimes].slice(0, MAX_RECENT_TIMES);
+
   return {
     icao24: s.icao24,
     lastCallsign: callsign ?? prev?.lastCallsign ?? null,
@@ -109,6 +118,7 @@ export function mergeOne(
     maxAltitudeM,
     minAltitudeM,
     recentDays: recentDays.join(","),
+    recentTimes: nextTimes.join(","),
   };
 }
 
@@ -182,4 +192,113 @@ export async function digestSummary(
     yesterdayCount,
     newTodayCount,
   };
+}
+
+
+/* =====================================================================
+ * Pattern detection.
+ * =====================================================================
+ *
+ * Given a sighting's recentTimes, group by (weekday, hour) using the
+ * user's local clock. If three or more sightings cluster into the same
+ * weekday+hour bucket, flag as "regular". We keep the best-scoring
+ * bucket per aircraft as the canonical pattern.
+ */
+
+export interface Pattern {
+  /** 0–6, Sunday = 0. */
+  readonly weekday: number;
+  /** 0–23 in the user's local timezone. */
+  readonly hour: number;
+  /** How many sightings landed in this bucket. */
+  readonly count: number;
+}
+
+/** Decode the recentTimes CSV into ms timestamps, newest-first. */
+export function decodeRecentTimes(s: string): number[] {
+  if (!s) return [];
+  return s
+    .split(",")
+    .map((x) => Number(x))
+    .filter((x) => Number.isFinite(x));
+}
+
+/** Bucket times into weekday/hour and return the most-common bucket. */
+export function dominantPattern(times: readonly number[]): Pattern | null {
+  if (times.length < 3) return null;
+  const counts = new Map<string, { wd: number; h: number; n: number }>();
+  for (const t of times) {
+    const d = new Date(t);
+    const wd = d.getDay();
+    const h = d.getHours();
+    const key = `${wd}:${h}`;
+    const existing = counts.get(key);
+    if (existing) existing.n += 1;
+    else counts.set(key, { wd, h, n: 1 });
+  }
+  let best: { wd: number; h: number; n: number } | null = null;
+  for (const entry of counts.values()) {
+    if (!best || entry.n > best.n) best = entry;
+  }
+  if (!best || best.n < 3) return null;
+  return { weekday: best.wd, hour: best.h, count: best.n };
+}
+
+/** Locale-friendly weekday names. */
+const WEEKDAY = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+export function prettyPattern(p: Pattern): string {
+  const hourLabel = `${p.hour.toString().padStart(2, "0")}:00`;
+  return `${WEEKDAY[p.weekday]}s around ${hourLabel}`;
+}
+
+export interface RegularVisitor {
+  readonly sighting: AircraftSighting;
+  readonly pattern: Pattern;
+}
+
+/** Find aircraft with a detectable regular-visit pattern. Highest n first. */
+export async function regularVisitors(
+  limit: number = 10
+): Promise<RegularVisitor[]> {
+  const all = await db.sightings.toArray();
+  const scored: RegularVisitor[] = [];
+  for (const s of all) {
+    const times = decodeRecentTimes(s.recentTimes);
+    const p = dominantPattern(times);
+    if (p) scored.push({ sighting: s, pattern: p });
+  }
+  scored.sort(
+    (a, b) =>
+      b.pattern.count - a.pattern.count ||
+      b.sighting.sightingCount - a.sighting.sightingCount
+  );
+  return scored.slice(0, limit);
+}
+
+/** Most common local hour-of-day across ALL sightings. Null if no data. */
+export interface HourOfDayStat {
+  readonly hour: number;
+  readonly count: number;
+}
+
+export async function busiestHour(): Promise<HourOfDayStat | null> {
+  const all = await db.sightings.toArray();
+  const buckets = new Array(24).fill(0) as number[];
+  for (const s of all) {
+    for (const t of decodeRecentTimes(s.recentTimes)) {
+      const h = new Date(t).getHours();
+      buckets[h] += 1;
+    }
+  }
+  let bestH = -1;
+  let bestN = 0;
+  for (let h = 0; h < 24; h++) {
+    if (buckets[h]! > bestN) {
+      bestN = buckets[h]!;
+      bestH = h;
+    }
+  }
+  if (bestH === -1 || bestN === 0) return null;
+  return { hour: bestH, count: bestN };
 }

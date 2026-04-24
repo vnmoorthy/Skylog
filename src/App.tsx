@@ -30,6 +30,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSky } from "./state/store";
 import { db } from "./lib/db";
 import { LiveMap, type LiveMapHandle } from "./components/LiveMap";
+import {
+  fireNotification,
+  ensureNotificationPermission,
+} from "./lib/notify";
 import { FlightCard } from "./components/FlightCard";
 import { OverheadIndicator } from "./components/OverheadIndicator";
 import { AircraftListPanel } from "./components/AircraftListPanel";
@@ -39,9 +43,17 @@ import { TimelineDrawer } from "./components/TimelineDrawer";
 import { DetailPanel } from "./components/DetailPanel";
 import { SettingsDrawer } from "./components/SettingsDrawer";
 import { WelcomeHint } from "./components/WelcomeHint";
+import { DigestCard } from "./components/DigestCard";
 import { HelpModal } from "./components/HelpModal";
 import { MemoryDrawer } from "./components/MemoryDrawer";
 import { getSighting } from "./lib/sightings";
+import { TrackFlightPrompt } from "./components/TrackFlightPrompt";
+import { TrackedFlightCard } from "./components/TrackedFlightCard";
+import {
+  trackCallsign,
+  type FlightTracker,
+  type TrackedFlightStatus,
+} from "./lib/flightTracker";
 import { loadAircraftDb } from "./lib/aircraftDb";
 import type { StateVector } from "./lib/opensky";
 import type {
@@ -63,6 +75,12 @@ export function App(): JSX.Element {
   const [aircraft, setAircraft] = useState<readonly StateVector[]>([]);
   const [helpOpen, setHelpOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [trackPromptOpen, setTrackPromptOpen] = useState(false);
+  const [trackedStatus, setTrackedStatus] = useState<TrackedFlightStatus | null>(
+    null
+  );
+  const [following, setFollowing] = useState<boolean>(false);
+  const trackerRef = useRef<FlightTracker | null>(null);
 
   const workerRef = useRef<Worker | null>(null);
   const mapRef = useRef<LiveMapHandle | null>(null);
@@ -148,10 +166,66 @@ export function App(): JSX.Element {
       else if (e.key === "t") setTimelineOpen((v) => !v);
       else if (e.key === "?") setHelpOpen((v) => !v);
       else if (e.key === "m") setMemoryOpen((v) => !v);
+      else if (e.key === "f") {
+        if (trackerRef.current) stopTracking();
+        else setTrackPromptOpen(true);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+
+  const startTracking = async (callsign: string): Promise<void> => {
+    stopTracking();
+    setFollowing(true);
+    // Ask for notification permission in the same user gesture.
+    void ensureNotificationPermission();
+    const tracker = trackCallsign(callsign, home, (status) => {
+      setTrackedStatus(status);
+      // Live alert: tracked flight within 5 km of home.
+      if (
+        status.kind === "live" &&
+        status.distanceM != null &&
+        status.distanceM <= 5_000
+      ) {
+        const cs = status.state.callsign ?? status.state.icao24.toUpperCase();
+        fireNotification({
+          key: `near:${cs}`,
+          title: `${cs} is nearly overhead`,
+          body:
+            status.etaSec != null && status.etaSec > 0
+              ? `About ${Math.max(1, Math.round(status.etaSec / 60))} min away.`
+              : "Inside 5 km of your home.",
+        });
+      }
+    });
+    trackerRef.current = tracker;
+    setTrackPromptOpen(false);
+  };
+
+  const stopTracking = (): void => {
+    trackerRef.current?.stop();
+    trackerRef.current = null;
+    setTrackedStatus(null);
+    setFollowing(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      trackerRef.current?.stop();
+    };
+  }, []);
+
+  // When tracking is active and the 'following' toggle is on, fly the
+  // map camera to the tracked plane every time we receive a new fix.
+  useEffect(() => {
+    if (!following) return;
+    if (trackedStatus?.kind !== "live") return;
+    const s = trackedStatus.state;
+    if (s.latitude == null || s.longitude == null) return;
+    mapRef.current?.flyTo([s.longitude, s.latitude], 9);
+  }, [trackedStatus, following]);
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-ink-950 text-ink-100">
@@ -186,8 +260,47 @@ export function App(): JSX.Element {
         onOpenMemory={() => setMemoryOpen((v) => !v)}
         memoryOpen={memoryOpen}
         onPickRegion={(c, z) => mapRef.current?.flyTo(c, z)}
+        onOpenTrack={() => setTrackPromptOpen(true)}
+        isTracking={trackedStatus != null}
       />
 
+      <DigestCard
+        onShowMemory={() => setMemoryOpen(true)}
+        onTrackRegular={async (icao24) => {
+          // Open the FlightCard for this aircraft — live if we currently
+          // see it, else synthesise from the sighting (same as MemoryDrawer).
+          const live = aircraft.find((a) => a.icao24 === icao24);
+          if (live) {
+            setSelectedLive(live);
+            return;
+          }
+          const s = await getSighting(icao24);
+          if (!s) return;
+          setSelectedLive({
+            icao24: s.icao24,
+            callsign: s.lastCallsign,
+            originCountry: s.originCountry,
+            timePosition: null,
+            lastContact: Math.round(s.lastSeenAt / 1000),
+            longitude: null,
+            latitude: null,
+            baroAltitudeM: null,
+            onGround: false,
+            velocityMps: null,
+            trackDeg: null,
+            verticalRateMps: null,
+            geoAltitudeM: null,
+            squawk: null,
+            spi: false,
+            positionSource: 0,
+            category: null,
+            _registration: s.registration,
+            _typeCode: s.typecode,
+            _aircraftDesc: null,
+            _operator: s.operator,
+          });
+        }}
+      />
       <WelcomeHint />
 
       <OverheadIndicator aircraft={aircraft} onSelect={setSelectedLive} />
@@ -245,6 +358,20 @@ export function App(): JSX.Element {
             });
             setMemoryOpen(false);
           }}
+        />
+      )}
+      {trackPromptOpen && (
+        <TrackFlightPrompt
+          onStart={startTracking}
+          onCancel={() => setTrackPromptOpen(false)}
+        />
+      )}
+      {trackedStatus && (
+        <TrackedFlightCard
+          status={trackedStatus}
+          following={following}
+          onToggleFollow={() => setFollowing((v) => !v)}
+          onStop={stopTracking}
         />
       )}
       {homeSetupOpen && (

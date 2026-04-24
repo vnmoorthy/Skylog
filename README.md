@@ -8,6 +8,14 @@ A real-time map of every plane flying near you, plus the ISS and other named sat
 
 Flight trackers are optimised for airline route-planners, not curious humans. They load slowly, bury data behind paywalls, and ask you to guess which moving dot woke you up at 3 AM. Skylog inverts that: open the app and within three seconds you are staring at a dark map with every ADS-B-equipped aircraft within the viewport rendered as a rotated arrow, coloured by altitude, moving smoothly. That is the whole product. Everything else — pass logs, loudness, satellites — is a layer on top.
 
+## What's new in v0.4
+
+- **Track a flight by number.** Paste any callsign (`UAL841`, `BA286`) in the track-flight prompt (`f`) and Skylog pins that aircraft globally — even when it leaves the viewport. Optional follow-on-map keeps the camera centered on the tracked plane as it flies.
+- **Live ETA to your home.** If a home is set, the tracked flight card shows distance and a rough ETA updated every poll.
+- **Browser notification when the tracked flight is within 5 km of home.** Opt-in, rate-limited. You'll know before it's overhead.
+- **Pattern detection over memory.** Skylog's aircraft memory now surfaces regular visitors — aircraft that cluster into the same weekday+hour. "Tuesdays around 07:00, 4 sightings." The memory drawer ranks them. The digest card surfaces the top three on the home screen.
+- **Always-visible daily digest.** A persistent card on the live map shows today vs yesterday, first-timers today, and your busiest hour of day. Collapses if you dismiss it.
+
 ## Features
 
 - **Live map as the first screen.** No onboarding gate. Open the page, the map centers on your location if you grant geolocation, otherwise a busy default (NYC), and the airplanes.live global feed populates the viewport in under five seconds.

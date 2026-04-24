@@ -39,7 +39,7 @@ export function HelpModal({ open, onClose }: HelpModalProps): JSX.Element | null
         <div className="flex items-start justify-between">
           <div>
             <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-accent">
-              skylog · v0.2
+              skylog · v0.4
             </p>
             <h2 className="mt-2 text-xl font-semibold">
               Live plane &amp; satellite tracker
@@ -50,8 +50,7 @@ export function HelpModal({ open, onClose }: HelpModalProps): JSX.Element | null
           </button>
         </div>
         <p className="mt-4 text-sm text-ink-300">
-          Every orange triangle on the map is a real aircraft, reporting its
-          position over ADS-B. Data comes from{" "}
+          Every orange triangle on the map is a real aircraft anywhere in the world, reporting its position over ADS-B. Data comes from{" "}
           <a
             href="https://airplanes.live"
             target="_blank"
@@ -70,6 +69,8 @@ export function HelpModal({ open, onClose }: HelpModalProps): JSX.Element | null
             keyboard shortcuts
           </h3>
           <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-xs">
+            <Shortcut k="f" label="track a flight by number" />
+            <Shortcut k="m" label="open aircraft memory" />
             <Shortcut k="s" label="toggle satellites" />
             <Shortcut k="l" label="toggle aircraft list" />
             <Shortcut k="h" label="open home setup" />
