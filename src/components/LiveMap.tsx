@@ -54,6 +54,10 @@ interface PlaneMarkerRef {
   state: StateVector;
   anchorAt: number;
   trail: Array<[number, number]>; // [lon, lat]
+  /** Last colour applied to the icon — used to avoid re-styling when unchanged. */
+  lastColor: string;
+  /** Last heading in degrees — used to skip tiny transform updates. */
+  lastHeading: number;
 }
 
 interface SatMarkerRef {
@@ -93,11 +97,14 @@ const DARK_STYLE: maplibregl.StyleSpecification = {
   ],
 };
 
-const PLANE_SVG = (fill: string): string =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="22" height="22" aria-hidden="true">
-     <path fill="${fill}" stroke="#06060a" stroke-width="1.1" stroke-linejoin="round"
-           d="M16 2 L19 14 L30 17 L30 20 L19 19 L18 27 L22 29 L22 30 L16 28 L10 30 L10 29 L14 27 L13 19 L2 20 L2 17 L13 14 Z"/>
-   </svg>`;
+// Stable SVG string — we set the fill via inline `color:` on the host div
+// using SVG's currentColor. This lets us swap colours on altitude change
+// without replacing the DOM subtree (which kills the CSS transition
+// state and makes the markers flicker every poll).
+const PLANE_SVG_MARKUP = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="22" height="22" aria-hidden="true">
+  <path fill="currentColor" stroke="#06060a" stroke-width="1.1" stroke-linejoin="round"
+        d="M16 2 L19 14 L30 17 L30 20 L19 19 L18 27 L22 29 L22 30 L16 28 L10 30 L10 29 L14 27 L13 19 L2 20 L2 17 L13 14 Z"/>
+</svg>`;
 
 const SAT_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="22" height="22" aria-hidden="true">
   <g fill="none" stroke="#9ad4ff" stroke-width="1.6" stroke-linejoin="round">
@@ -542,14 +549,24 @@ function applyPoll(
     seen.add(s.icao24);
     const heading = s.trackDeg ?? 0;
     const color = altitudeColor(s.baroAltitudeM ?? s.geoAltitudeM ?? 0);
-    const svg = PLANE_SVG(color);
 
     const existing = markers.get(s.icao24);
     if (existing) {
-      existing.iconEl.innerHTML = svg;
-      existing.iconEl.style.transform = `rotate(${heading}deg)`;
+      // Update position.
       existing.marker.setLngLat([s.longitude, s.latitude]);
-      // Only push to trail when we moved meaningfully (>10 m roughly).
+      // Only re-style the fill if the altitude-color changed.
+      if (existing.lastColor !== color) {
+        existing.iconEl.style.color = color;
+        existing.lastColor = color;
+      }
+      // Only update the rotation if heading actually changed meaningfully
+      // (>2°). Re-assigning the same value can interrupt the CSS transition.
+      const headingDelta = Math.abs(((heading - existing.lastHeading + 540) % 360) - 180);
+      if (headingDelta > 2) {
+        existing.iconEl.style.transform = `rotate(${heading}deg)`;
+        existing.lastHeading = heading;
+      }
+      // Extend the trail only when the plane actually moved (≈10 m).
       const last = existing.trail[existing.trail.length - 1];
       if (!last || Math.hypot(last[0] - s.longitude, last[1] - s.latitude) > 0.0001) {
         existing.trail.push([s.longitude, s.latitude]);
@@ -559,10 +576,11 @@ function applyPoll(
       existing.anchorAt = now;
     } else {
       const iconEl = document.createElement("div");
-      iconEl.innerHTML = svg;
+      iconEl.innerHTML = PLANE_SVG_MARKUP;
       iconEl.style.cssText = `
         width:22px;height:22px;cursor:pointer;
-        transition:transform 400ms linear;
+        color:${color};
+        transition:transform 400ms linear, color 300ms ease;
         transform:rotate(${heading}deg);
         filter:${BASE_GLOW};
       `;
@@ -587,6 +605,8 @@ function applyPoll(
         state: s,
         anchorAt: now,
         trail: [[s.longitude, s.latitude]],
+        lastColor: color,
+        lastHeading: heading,
       });
     }
   }
