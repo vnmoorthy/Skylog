@@ -70,7 +70,14 @@ export function startLivePoller(
       return;
     }
     try {
-      const res = await fetch(statesUrl(bbox), {
+      // OpenSky's anonymous REST endpoint does not consistently emit CORS
+      // headers from arbitrary web origins (in particular, GitHub Pages
+      // domains), which surfaces to the browser as "TypeError: Failed to
+      // fetch". We route through a public CORS proxy. For production deploys
+      // you should front this with your own Cloudflare Worker or similar.
+      const direct = statesUrl(bbox);
+      const url = `https://corsproxy.io/?url=${encodeURIComponent(direct)}`;
+      const res = await fetch(url, {
         headers: { Accept: "application/json" },
       });
       if (cancelled) return;

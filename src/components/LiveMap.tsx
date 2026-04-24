@@ -565,16 +565,16 @@ function StatusBadge({
     status.kind === "loading"
       ? "Loading aircraft…"
       : status.kind === "ok"
-      ? `${aircraftCount} aircraft in view`
+      ? `${aircraftCount} aircraft · live from OpenSky`
       : status.kind === "empty"
       ? "No aircraft in view — try panning somewhere busy"
       : status.kind === "too_wide"
       ? "Zoom in to load aircraft"
       : status.kind === "rate_limited"
-      ? "OpenSky rate-limited — retrying"
+      ? "OpenSky rate-limited (anonymous quota) — retrying"
       : status.kind === "offline"
       ? "Offline"
-      : `Error: ${status.message}`;
+      : `OpenSky unreachable — ${status.message}. Will retry.`;
 
   return (
     <div className="pointer-events-none absolute left-4 bottom-16 z-10 flex flex-col gap-1">
