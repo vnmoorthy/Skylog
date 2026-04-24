@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <radialGradient id="g1" cx="35%" cy="40%" r="75%">
+      <stop offset="0%" stop-color="#1a1a22"/>
+      <stop offset="100%" stop-color="#06060a"/>
+    </radialGradient>
+    <linearGradient id="g2" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ff8a4c"/>
+      <stop offset="100%" stop-color="#ef4c24"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#g1)"/>
+
+  <!-- concentric range rings -->
+  <g stroke="#1f1f28" fill="none">
+    <circle cx="900" cy="320" r="90"/>
+    <circle cx="900" cy="320" r="170"/>
+    <circle cx="900" cy="320" r="260"/>
+    <circle cx="900" cy="320" r="350"/>
+  </g>
+
+  <!-- decorative plane triangles -->
+  <g fill="url(#g2)" stroke="#06060a" stroke-width="2">
+    <g transform="translate(480,290) rotate(35)"><path d="M0 -18 L4 -2 L22 2 L22 6 L4 5 L3 15 L7 17 L7 19 L0 18 L-7 19 L-7 17 L-3 15 L-4 5 L-22 6 L-22 2 L-4 -2 Z"/></g>
+    <g transform="translate(600,380) rotate(75)"><path d="M0 -18 L4 -2 L22 2 L22 6 L4 5 L3 15 L7 17 L7 19 L0 18 L-7 19 L-7 17 L-3 15 L-4 5 L-22 6 L-22 2 L-4 -2 Z"/></g>
+    <g transform="translate(920,220) rotate(130)"><path d="M0 -18 L4 -2 L22 2 L22 6 L4 5 L3 15 L7 17 L7 19 L0 18 L-7 19 L-7 17 L-3 15 L-4 5 L-22 6 L-22 2 L-4 -2 Z"/></g>
+    <g transform="translate(850,420) rotate(200)"><path d="M0 -18 L4 -2 L22 2 L22 6 L4 5 L3 15 L7 17 L7 19 L0 18 L-7 19 L-7 17 L-3 15 L-4 5 L-22 6 L-22 2 L-4 -2 Z"/></g>
+    <g transform="translate(1040,330) rotate(-70)"><path d="M0 -18 L4 -2 L22 2 L22 6 L4 5 L3 15 L7 17 L7 19 L0 18 L-7 19 L-7 17 L-3 15 L-4 5 L-22 6 L-22 2 L-4 -2 Z"/></g>
+  </g>
+
+  <!-- brand dot -->
+  <circle cx="85" cy="103" r="10" fill="url(#g2)"/>
+
+  <text x="115" y="112" fill="#fafafa" font-family="ui-monospace, Menlo, monospace"
+        font-size="18" letter-spacing="6">SKYLOG · LIVE PLANE &amp; SATELLITE TRACKER</text>
+
+  <text x="85" y="260" fill="#fafafa" font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+        font-size="76" font-weight="700">Every plane,</text>
+  <text x="85" y="340" fill="#fafafa" font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+        font-size="76" font-weight="700">worldwide,</text>
+  <text x="85" y="420" fill="#ff8a4c" font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+        font-size="76" font-weight="700">remembered.</text>
+
+  <text x="85" y="500" fill="#8a8a96" font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+        font-size="24">A flight tracker that learns the sky over your house.</text>
+
+  <text x="85" y="555" fill="#8a8a96" font-family="ui-monospace, Menlo, monospace"
+        font-size="14" letter-spacing="3">AIRPLANES.LIVE · OPENSKY · CARTO · OPEN SOURCE · MIT</text>
+</svg>

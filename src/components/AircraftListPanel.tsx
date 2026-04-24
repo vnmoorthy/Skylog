@@ -57,7 +57,7 @@ export function AircraftListPanel({
 
   return (
     <aside
-      className="pointer-events-auto fixed right-0 top-0 z-30 flex h-full w-[340px] max-w-[90vw] flex-col border-l border-ink-800 bg-ink-950/95 backdrop-blur"
+      className="pointer-events-auto fixed right-0 top-0 z-30 flex h-full w-[340px] max-w-[92vw] flex-col border-l border-ink-800 bg-ink-950/95 backdrop-blur"
       role="complementary"
       aria-label="Aircraft in view"
     >

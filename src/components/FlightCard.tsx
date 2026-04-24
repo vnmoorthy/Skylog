@@ -20,6 +20,8 @@ import {
   type UnitSystem,
 } from "../lib/units";
 import { lookupAircraft, type AircraftInfo } from "../lib/aircraftDb";
+import { getSighting } from "../lib/sightings";
+import type { AircraftSighting } from "../lib/db";
 import { haversineMeters } from "../lib/geo";
 import { useSky } from "../state/store";
 
@@ -35,6 +37,7 @@ export function FlightCard({ state, onClose }: FlightCardProps): JSX.Element {
   // includes them); fall back to async aircraft-DB lookup for OpenSky-style
   // payloads that lack them.
   const [ac, setAc] = useState<AircraftInfo | null>(null);
+  const [sighting, setSighting] = useState<AircraftSighting | null>(null);
 
   const enriched: AircraftInfo | null =
     state._registration || state._typeCode || state._aircraftDesc || state._operator
@@ -69,6 +72,21 @@ export function FlightCard({ state, onClose }: FlightCardProps): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.icao24, enriched?.registration, enriched?.typecode]);
 
+
+  useEffect(() => {
+    let cancelled = false;
+    getSighting(state.icao24)
+      .then((s) => {
+        if (!cancelled) setSighting(s ?? null);
+      })
+      .catch(() => {
+        /* non-fatal */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [state.icao24]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === "Escape") onClose();
@@ -92,7 +110,7 @@ export function FlightCard({ state, onClose }: FlightCardProps): JSX.Element {
 
   return (
     <aside
-      className="pointer-events-auto fixed right-4 top-20 z-30 w-[340px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-md border border-ink-800 bg-ink-900/95 shadow-2xl backdrop-blur"
+      className="pointer-events-auto fixed right-2 top-[4.2rem] sm:right-4 sm:top-20 z-30 w-[340px] max-w-[calc(100vw-1rem)] overflow-hidden rounded-md border border-ink-800 bg-ink-900/95 shadow-2xl backdrop-blur"
       role="dialog"
       aria-label={`Flight ${title}`}
     >
@@ -166,6 +184,33 @@ export function FlightCard({ state, onClose }: FlightCardProps): JSX.Element {
           {state.onGround ? "on ground" : state.spi ? "special" : "airborne"}
         </Stat>
       </section>
+      {sighting && (
+        <section className="border-t border-ink-800 px-4 py-3">
+          <p className="font-mono text-[9px] uppercase tracking-widest text-accent">
+            skylog has seen this plane before
+          </p>
+          <div className="mt-2 grid grid-cols-2 gap-3">
+            <Stat label="Total sightings">
+              {sighting.sightingCount.toLocaleString()}
+            </Stat>
+            <Stat label="Distinct days">{sighting.dayCount}</Stat>
+            <Stat label="First seen">
+              {timeAgoShort(sighting.firstSeenAt)}
+            </Stat>
+            <Stat label="Max altitude">
+              {sighting.maxAltitudeM != null
+                ? `${Math.round(sighting.maxAltitudeM * 3.28084).toLocaleString()} ft`
+                : "—"}
+            </Stat>
+          </div>
+          {sighting.callsigns.length > 1 && (
+            <p className="mt-2 font-mono text-[10px] text-ink-500">
+              callsigns used: {sighting.callsigns.slice(0, 5).join(", ")}
+              {sighting.callsigns.length > 5 ? "…" : ""}
+            </p>
+          )}
+        </section>
+      )}
       <footer className="border-t border-ink-800 px-4 py-2 font-mono text-[10px] uppercase tracking-wider text-ink-500">
         icao24 {state.icao24}
         {state.positionSource != null && ` · src ${posSourceLabel(state.positionSource)}`}
@@ -228,4 +273,16 @@ function posSourceLabel(src: number): string {
     default:
       return `${src}`;
   }
+}
+
+function timeAgoShort(t: number): string {
+  const diff = Date.now() - t;
+  if (diff < 60_000) return "just now";
+  const min = Math.round(diff / 60_000);
+  if (min < 60) return `${min}m ago`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.round(h / 24);
+  if (d < 30) return `${d}d ago`;
+  return new Date(t).toLocaleDateString();
 }

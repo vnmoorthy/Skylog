@@ -22,7 +22,7 @@
  *      indicator to consume.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import maplibregl, {
   Map as MlMap,
   Marker as MlMarker,
@@ -38,6 +38,7 @@ import {
   type SatPosition,
 } from "../lib/satellites";
 import { extrapolate } from "../lib/deadReckon";
+import { recordSightings } from "../lib/sightings";
 import { useSky } from "../state/store";
 
 interface LiveMapProps {
@@ -122,12 +123,14 @@ const BASE_GLOW = "drop-shadow(0 1px 2px rgba(0,0,0,0.55))";
 
 /* -------------------- component -------------------- */
 
-export function LiveMap({
-  onSelectAircraft,
-  selectedIcao24,
-  showSatellites,
-  onAircraftListChange,
-}: LiveMapProps): JSX.Element {
+export interface LiveMapHandle {
+  flyTo: (center: [number, number], zoom: number) => void;
+}
+
+export const LiveMap = forwardRef<LiveMapHandle, LiveMapProps>(function LiveMap(
+  { onSelectAircraft, selectedIcao24, showSatellites, onAircraftListChange },
+  ref
+): JSX.Element {
   const container = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MlMap | null>(null);
   const markersRef = useRef<Map<string, PlaneMarkerRef>>(new Map());
@@ -142,6 +145,14 @@ export function LiveMap({
   const [aircraftCount, setAircraftCount] = useState(0);
   const [satCount, setSatCount] = useState(0);
 
+  useImperativeHandle(ref, () => ({
+    flyTo: (center, zoom) => {
+      const map = mapRef.current;
+      if (!map) return;
+      map.flyTo({ center, zoom, duration: 1500, essential: true });
+    },
+  }), []);
+
   /* -------------------- boot map -------------------- */
   useEffect(() => {
     if (!container.current) return;
@@ -149,7 +160,7 @@ export function LiveMap({
     const initialCenter: [number, number] = home
       ? [home.lon, home.lat]
       : [-73.985, 40.75]; // NYC — always busy.
-    const initialZoom = home ? 9 : 7.5;
+    const initialZoom = home ? 9 : 6;
 
     const map = new maplibregl.Map({
       container: container.current,
@@ -326,6 +337,9 @@ export function LiveMap({
       onAircraftListChange(states);
       applyPoll(map, markersRef.current, states, onSelectAircraft);
       setAircraftCount(states.length);
+      // Fold sightings into the gbrain-style persistent memory. Fire and
+      // forget — the UI doesn't wait on the write.
+      void recordSightings(states);
     };
 
     const poller = startLivePoller(readBBox(), handleStates, setStatus);
@@ -456,7 +470,7 @@ export function LiveMap({
       />
     </div>
   );
-}
+});
 
 /* -------------------- pure helpers -------------------- */
 

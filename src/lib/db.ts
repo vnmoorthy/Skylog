@@ -93,6 +93,40 @@ export interface CachedAirport {
   readonly lon: number;
 }
 
+export interface AircraftSighting {
+  /** Lowercase 6-hex ICAO24 of the aircraft. Primary key. */
+  readonly icao24: string;
+  /** Most recent callsign string we've associated with this hex. */
+  readonly lastCallsign: string | null;
+  /** All distinct callsigns we've ever seen this hex use. */
+  readonly callsigns: readonly string[];
+  /** Most recent registration enrichment, if any data source provided it. */
+  readonly registration: string | null;
+  /** Most recent aircraft type code, if known (e.g. "B738"). */
+  readonly typecode: string | null;
+  /** Most recent operator string, if known (e.g. "United Airlines"). */
+  readonly operator: string | null;
+  /** Most recent country of registration from the live feed. */
+  readonly originCountry: string | null;
+  /** Unix-ms of the very first time we saw this aircraft. */
+  readonly firstSeenAt: number;
+  /** Unix-ms of the most recent sighting. */
+  readonly lastSeenAt: number;
+  /** Total number of polls that included this aircraft. */
+  readonly sightingCount: number;
+  /** Number of distinct UTC days on which we've seen this aircraft. */
+  readonly dayCount: number;
+  /** Max altitude in meters across all sightings. */
+  readonly maxAltitudeM: number | null;
+  /** Min altitude in meters across all sightings. */
+  readonly minAltitudeM: number | null;
+  /**
+   * Comma-separated YYYY-MM-DD UTC dates we've seen this aircraft on,
+   * capped to the most recent 30 for a bounded footprint.
+   */
+  readonly recentDays: string;
+}
+
 export interface MetaKV {
   readonly key: string;
   readonly value: string;
@@ -102,18 +136,26 @@ class SkylogDB extends Dexie {
   passes!: Table<AircraftPass, string>;
   aircraft!: Table<CachedAircraft, string>;
   airports!: Table<CachedAirport, string>;
+  sightings!: Table<AircraftSighting, string>;
   meta!: Table<MetaKV, string>;
 
   constructor() {
     super("skylog");
 
-    // Version 1 schema. Bump and add an upgrade path if changing shape.
+    // Version 1 schema.
     this.version(1).stores({
-      // Compound index on icao24 so a live-panel lookup can pull recent
-      // entries for the same hex.
       passes: "passId, icao24, firstSeen, lastSeen, closestApproachAt, peakDb",
       aircraft: "icao24",
       airports: "icao, iata",
+      meta: "key",
+    });
+    // Version 2: aircraft memory ("sightings"). Dexie auto-carries
+    // version-1 data forward because we only *add* a store.
+    this.version(2).stores({
+      passes: "passId, icao24, firstSeen, lastSeen, closestApproachAt, peakDb",
+      aircraft: "icao24",
+      airports: "icao, iata",
+      sightings: "icao24, lastSeenAt, sightingCount, dayCount",
       meta: "key",
     });
   }

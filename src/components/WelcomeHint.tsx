@@ -27,15 +27,17 @@ export function WelcomeHint(): JSX.Element | null {
 
   return (
     <div
-      className="pointer-events-auto absolute bottom-4 right-4 z-20 max-w-[22rem] rounded-md border border-ink-800 bg-ink-900/90 p-3 backdrop-blur"
+      className="pointer-events-auto absolute bottom-3 right-3 z-20 hidden max-w-[22rem] rounded-md border border-ink-800 bg-ink-900/90 p-3 backdrop-blur md:block"
       role="status"
     >
       <p className="font-mono text-[10px] uppercase tracking-widest text-accent">
         welcome
       </p>
       <p className="mt-2 text-xs leading-relaxed text-ink-200">
-        Every orange triangle is a live aircraft. Click one for details.
-        Pan or zoom anywhere — the feed follows the map. Press{" "}
+        Every orange triangle is a live aircraft, anywhere in the world. Click
+        one for details. Pan or zoom — the feed follows the map. Skylog
+        <em className="font-normal text-accent"> remembers every plane it sees</em>
+        so when that 737 flies over tomorrow, it'll know. Press{" "}
         <kbd className="rounded bg-ink-800 px-1 font-mono text-[10px] text-accent">
           s
         </kbd>{" "}
@@ -47,7 +49,11 @@ export function WelcomeHint(): JSX.Element | null {
         <kbd className="rounded bg-ink-800 px-1 font-mono text-[10px] text-accent">
           h
         </kbd>{" "}
-        to set your home location.
+        to set your home location, or{" "}
+        <kbd className="rounded bg-ink-800 px-1 font-mono text-[10px] text-accent">
+          m
+        </kbd>{" "}
+        to see planes Skylog already remembers.
       </p>
       <button
         onClick={() => {

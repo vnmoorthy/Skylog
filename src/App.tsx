@@ -29,7 +29,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSky } from "./state/store";
 import { db } from "./lib/db";
-import { LiveMap } from "./components/LiveMap";
+import { LiveMap, type LiveMapHandle } from "./components/LiveMap";
 import { FlightCard } from "./components/FlightCard";
 import { OverheadIndicator } from "./components/OverheadIndicator";
 import { AircraftListPanel } from "./components/AircraftListPanel";
@@ -40,6 +40,8 @@ import { DetailPanel } from "./components/DetailPanel";
 import { SettingsDrawer } from "./components/SettingsDrawer";
 import { WelcomeHint } from "./components/WelcomeHint";
 import { HelpModal } from "./components/HelpModal";
+import { MemoryDrawer } from "./components/MemoryDrawer";
+import { getSighting } from "./lib/sightings";
 import { loadAircraftDb } from "./lib/aircraftDb";
 import type { StateVector } from "./lib/opensky";
 import type {
@@ -60,8 +62,10 @@ export function App(): JSX.Element {
   const [selectedLive, setSelectedLive] = useState<StateVector | null>(null);
   const [aircraft, setAircraft] = useState<readonly StateVector[]>([]);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
 
   const workerRef = useRef<Worker | null>(null);
+  const mapRef = useRef<LiveMapHandle | null>(null);
 
   /* Warm aircraft metadata so FlightCard doesn't flicker. */
   useEffect(() => {
@@ -143,6 +147,7 @@ export function App(): JSX.Element {
       else if (e.key === "h") setHomeSetupOpen((v) => !v);
       else if (e.key === "t") setTimelineOpen((v) => !v);
       else if (e.key === "?") setHelpOpen((v) => !v);
+      else if (e.key === "m") setMemoryOpen((v) => !v);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -151,6 +156,7 @@ export function App(): JSX.Element {
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-ink-950 text-ink-100">
       <LiveMap
+        ref={mapRef}
         onSelectAircraft={handleSelectLive}
         selectedIcao24={selectedLive?.icao24 ?? null}
         showSatellites={showSatellites}
@@ -177,6 +183,9 @@ export function App(): JSX.Element {
         onOpenList={() => setListOpen((v) => !v)}
         listOpen={listOpen}
         onOpenHelp={() => setHelpOpen(true)}
+        onOpenMemory={() => setMemoryOpen((v) => !v)}
+        memoryOpen={memoryOpen}
+        onPickRegion={(c, z) => mapRef.current?.flyTo(c, z)}
       />
 
       <WelcomeHint />
@@ -196,6 +205,48 @@ export function App(): JSX.Element {
         />
       )}
 
+      {memoryOpen && (
+        <MemoryDrawer
+          onClose={() => setMemoryOpen(false)}
+          onSelectIcao24={async (icao24) => {
+            const live = aircraft.find((a) => a.icao24 === icao24);
+            if (live) {
+              setSelectedLive(live);
+              setMemoryOpen(false);
+              return;
+            }
+            // Aircraft not in view; synthesize a minimal state from the
+            // persisted sighting so the FlightCard can still show its
+            // history.
+            const s = await getSighting(icao24);
+            if (!s) return;
+            setSelectedLive({
+              icao24: s.icao24,
+              callsign: s.lastCallsign,
+              originCountry: s.originCountry,
+              timePosition: null,
+              lastContact: Math.round(s.lastSeenAt / 1000),
+              longitude: null,
+              latitude: null,
+              baroAltitudeM: null,
+              onGround: false,
+              velocityMps: null,
+              trackDeg: null,
+              verticalRateMps: null,
+              geoAltitudeM: null,
+              squawk: null,
+              spi: false,
+              positionSource: 0,
+              category: null,
+              _registration: s.registration,
+              _typeCode: s.typecode,
+              _aircraftDesc: null,
+              _operator: s.operator,
+            });
+            setMemoryOpen(false);
+          }}
+        />
+      )}
       {homeSetupOpen && (
         <HomeSetup
           onDone={() => setHomeSetupOpen(false)}

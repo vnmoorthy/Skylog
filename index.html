@@ -2,15 +2,18 @@
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0a0a0b" />
     <meta
       name="description"
-      content="Skylog — live plane and satellite tracker with an on-device loudness model. Runs entirely in your browser."
+      content="Skylog — live plane and satellite tracker that remembers every aircraft it sees. Works worldwide, runs entirely in your browser."
     />
+    <meta name="author" content="Skylog contributors" />
+    <meta name="keywords" content="flight tracker, ADS-B, live aircraft map, satellite tracker, ISS tracker, OpenSky, airplanes.live" />
 
     <!-- No third-party scripts. No analytics. Everything runs in the browser. -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -18,12 +21,38 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
+    <link rel="preconnect" href="https://api.airplanes.live" />
+    <link rel="preconnect" href="https://basemaps.cartocdn.com" />
 
-    <title>Skylog — live plane &amp; satellite tracker</title>
-    <meta property="og:title" content="Skylog" />
-    <meta property="og:description" content="Live plane and satellite tracker with an on-device loudness model. Runs entirely in your browser." />
+    <title>Skylog — live plane &amp; satellite tracker that remembers</title>
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Skylog — every plane, worldwide, remembered." />
+    <meta
+      property="og:description"
+      content="A live flight tracker that learns the sky. See every aircraft in view worldwide, in real time. Skylog remembers every plane it sees on your device — no account, no server, no tracker."
+    />
+    <meta property="og:image" content="/og-image.svg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:url" content="https://vnmoorthy.github.io/Skylog/" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Skylog — every plane, worldwide, remembered." />
+    <meta
+      name="twitter:description"
+      content="A live flight tracker that learns the sky. Every aircraft in view, in real time. Remembers every plane it sees on your device."
+    />
+    <meta name="twitter:image" content="/og-image.svg" />
   </head>
   <body class="bg-ink-950 text-ink-100 antialiased">
+    <noscript>
+      <div style="padding: 2rem; text-align: center; color: #fafafa; font-family: system-ui">
+        Skylog needs JavaScript to render the live map. Please enable it.
+      </div>
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

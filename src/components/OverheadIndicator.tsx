@@ -45,7 +45,7 @@ export function OverheadIndicator({
 
   return (
     <div
-      className="pointer-events-auto absolute bottom-4 left-4 z-20 rounded-md border border-ink-800 bg-ink-900/85 p-3 backdrop-blur"
+      className="pointer-events-auto absolute bottom-3 left-3 right-3 z-20 max-w-md rounded-md border border-ink-800 bg-ink-900/85 p-3 backdrop-blur sm:right-auto"
       aria-live="polite"
     >
       <p className="font-mono text-[9px] uppercase tracking-widest text-ink-500">

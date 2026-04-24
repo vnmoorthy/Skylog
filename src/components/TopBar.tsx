@@ -7,6 +7,7 @@
  */
 
 import { useSky } from "../state/store";
+import { RegionPicker } from "./RegionPicker";
 
 interface TopBarProps {
   showSatellites: boolean;
@@ -16,6 +17,9 @@ interface TopBarProps {
   onOpenList: () => void;
   listOpen: boolean;
   onOpenHelp: () => void;
+  onOpenMemory: () => void;
+  memoryOpen: boolean;
+  onPickRegion: (center: [number, number], zoom: number) => void;
 }
 
 export function TopBar({
@@ -26,6 +30,9 @@ export function TopBar({
   onOpenList,
   listOpen,
   onOpenHelp,
+  onOpenMemory,
+  memoryOpen,
+  onPickRegion,
 }: TopBarProps): JSX.Element {
   const home = useSky((s) => s.home);
   const passCount = useSky((s) => Object.keys(s.passes).length);
@@ -40,12 +47,16 @@ export function TopBar({
             skylog
           </span>
         </div>
-        <span className="font-mono text-[9px] uppercase tracking-wider text-ink-500">
+        <span className="hidden sm:inline font-mono text-[9px] uppercase tracking-wider text-ink-500">
           live plane &amp; satellite tracker
         </span>
       </div>
 
-      <nav className="pointer-events-auto flex items-center gap-1 rounded bg-ink-900/85 px-1.5 py-1.5 backdrop-blur">
+      <nav className="pointer-events-auto flex max-w-[85vw] items-center gap-1 overflow-x-auto rounded bg-ink-900/85 px-1.5 py-1.5 backdrop-blur">
+        <RegionPicker onPick={onPickRegion} />
+        <Btn onClick={onOpenMemory} active={memoryOpen} shortcut="M">
+          memory
+        </Btn>
         <Btn onClick={onToggleSatellites} active={showSatellites} shortcut="S">
           satellites
         </Btn>
