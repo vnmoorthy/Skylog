@@ -7,4 +7,7 @@ dist
 .DS_Store
 coverage
 .vite
-public/data/*.json.gz
+# Real aircraft/airport snapshots produced by `pnpm build:data` are multi-
+# megabyte and rebuilt from public sources. Keep the tiny stubs in git so
+# the app works out of the box; ignore real builds via filename marker.
+public/data/*.large.json.gz
