@@ -189,19 +189,25 @@ export function LiveMap({
     mapRef.current = map;
     // Expose for devtools debugging.
     (window as unknown as { __skylogMap?: MlMap }).__skylogMap = map;
-    // MapLibre can latch onto a 0x0 container size when mounted inside a flex
-    // layout that hasn't finished its initial pass. We force a resize
-    // immediately, again on load, and trigger a manual repaint on first idle
-    // so the canvas never stays blank.
-    map.resize();
-    map.once("load", () => {
-      map.resize();
-      map.triggerRepaint();
-    });
-    map.once("idle", () => {
-      map.resize();
-      map.triggerRepaint();
-    });
+    // MapLibre occasionally latches onto a stale container size when
+    // mounted inside a React tree that re-lays out during hydration,
+    // leaving the WebGL canvas blank. The single trustworthy fix we
+    // have found is to schedule a handful of resize+triggerRepaint
+    // passes across the first second of the map's life. It is cheap.
+    const kickTimers: ReturnType<typeof setTimeout>[] = [];
+    const kick = () => {
+      if (!mapRef.current) return;
+      mapRef.current.resize();
+      mapRef.current.triggerRepaint();
+    };
+    kickTimers.push(setTimeout(kick, 0));
+    kickTimers.push(setTimeout(kick, 100));
+    kickTimers.push(setTimeout(kick, 500));
+    kickTimers.push(setTimeout(kick, 1500));
+    // Also wire a ResizeObserver on the container so the map stays sharp
+    // when the browser window changes size.
+    const ro = new ResizeObserver(kick);
+    if (container.current) ro.observe(container.current);
     map.on("error", (e) => {
       // eslint-disable-next-line no-console
       console.warn("maplibre error:", (e as { error?: { message?: string } }).error?.message ?? e);
@@ -262,6 +268,8 @@ export function LiveMap({
     });
 
     return () => {
+      for (const t of kickTimers) clearTimeout(t);
+      ro.disconnect();
       map.remove();
       mapRef.current = null;
       markersRef.current.clear();
