@@ -3,8 +3,13 @@ import react from "@vitejs/plugin-react";
 import path from "node:path";
 
 // https://vitejs.dev/config/
-export default defineConfig({
+//
+// `base` is set to "/Skylog/" only at build time so the production bundle
+// hosted on GitHub Pages resolves assets from /Skylog/. Local `vite dev`
+// still uses "/" so there's no friction during development.
+export default defineConfig(({ command }) => ({
   plugins: [react()],
+  base: command === "build" ? "/Skylog/" : "/",
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),
@@ -35,4 +40,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));
