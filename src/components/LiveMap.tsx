@@ -95,10 +95,10 @@ const STYLE_DARK: StyleSpecification = {
     basemap: {
       type: "raster",
       tiles: [
-        "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
-        "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
-        "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
-        "https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
+        "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+        "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+        "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+        "https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
       ],
       tileSize: 256,
       attribution:
@@ -187,6 +187,10 @@ export function LiveMap({
       attributionControl: { compact: true },
     });
     mapRef.current = map;
+    // Expose for devtools debugging.
+    (window as unknown as { __skylogMap?: MlMap }).__skylogMap = map;
+    // Force a resize tick on next frame — guards against 0-size mount races.
+    requestAnimationFrame(() => map.resize());
     map.on("error", (e) => {
       // eslint-disable-next-line no-console
       console.warn("maplibre error:", (e as { error?: { message?: string } }).error?.message ?? e);
@@ -565,7 +569,7 @@ function StatusBadge({
     status.kind === "loading"
       ? "Loading aircraft…"
       : status.kind === "ok"
-      ? `${aircraftCount} aircraft · live from OpenSky`
+      ? `${aircraftCount} aircraft · live from airplanes.live`
       : status.kind === "empty"
       ? "No aircraft in view — try panning somewhere busy"
       : status.kind === "too_wide"
