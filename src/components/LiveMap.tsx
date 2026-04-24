@@ -177,17 +177,36 @@ export const LiveMap = forwardRef<LiveMapHandle, LiveMapProps>(function LiveMap(
 
     // MapLibre occasionally latches onto a stale container size when
     // mounted inside a React tree that re-lays out during hydration,
-    // leaving the WebGL canvas blank. For the first ~4 s of map life we
-    // continually trigger a repaint — enough of those land on a frame
-    // where the tiles have loaded and the size is real. After that we
-    // rely on natural moveend / sourcedata events.
-    const bootPoll = setInterval(() => {
+    // leaving the WebGL canvas blank. We combat that with three
+    // independent kicks:
+    //   1. A fast 100 ms repaint poll for the first 12 s of map life.
+    //      Noisy but deterministic — one of those ticks always lands
+    //      on a frame where the canvas has its final dimensions.
+    //   2. A sourcedata event listener that forces a resize/repaint
+    //      when the first basemap tile finishes loading.
+    //   3. A ResizeObserver on the container div (below), so later
+    //      window resizes keep the canvas sharp.
+    const kickMap = (): void => {
       const m = mapRef.current;
       if (!m) return;
       m.resize();
       m.triggerRepaint();
-    }, 150);
-    const stopBootPoll = setTimeout(() => clearInterval(bootPoll), 4000);
+    };
+    const bootPoll = setInterval(kickMap, 100);
+    const stopBootPoll = setTimeout(() => clearInterval(bootPoll), 12_000);
+    const onSourceData = (): void => {
+      // First basemap tile arrival — flush a resize in case the
+      // canvas was mis-sized when the map first rendered.
+      kickMap();
+    };
+    map.on("sourcedata", onSourceData);
+    // Also run a couple of explicit kicks on the next paint frames,
+    // covering the very first render where the container might still
+    // be laying out.
+    requestAnimationFrame(() => {
+      kickMap();
+      requestAnimationFrame(kickMap);
+    });
     // ResizeObserver keeps the canvas sharp through later window resizes.
     const ro = new ResizeObserver(() => {
       const m = mapRef.current;
@@ -275,6 +294,7 @@ export const LiveMap = forwardRef<LiveMapHandle, LiveMapProps>(function LiveMap(
     return () => {
       clearInterval(bootPoll);
       clearTimeout(stopBootPoll);
+      map.off("sourcedata", onSourceData);
       ro.disconnect();
       map.remove();
       mapRef.current = null;
