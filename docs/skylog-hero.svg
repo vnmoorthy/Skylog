@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 400" width="1000" height="400">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0a0a0b"/>
+      <stop offset="1" stop-color="#17171c"/>
+    </linearGradient>
+    <linearGradient id="track" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff8a4c" stop-opacity="0"/>
+      <stop offset="1" stop-color="#ff8a4c" stop-opacity="0.6"/>
+    </linearGradient>
+  </defs>
+  <rect width="1000" height="400" fill="url(#bg)"/>
+  <!-- lat/lon grid -->
+  <g stroke="#1f1f27" stroke-width="0.5">
+    <line x1="0" y1="100" x2="1000" y2="100"/>
+    <line x1="0" y1="200" x2="1000" y2="200"/>
+    <line x1="0" y1="300" x2="1000" y2="300"/>
+    <line x1="200" y1="0" x2="200" y2="400"/>
+    <line x1="400" y1="0" x2="400" y2="400"/>
+    <line x1="600" y1="0" x2="600" y2="400"/>
+    <line x1="800" y1="0" x2="800" y2="400"/>
+  </g>
+  <!-- trails -->
+  <path d="M80 310 Q 260 270, 420 180 T 760 110" fill="none" stroke="url(#track)" stroke-width="2"/>
+  <path d="M50 200 Q 250 210, 450 220 T 850 240" fill="none" stroke="url(#track)" stroke-width="1.5"/>
+  <path d="M900 80 Q 780 160, 600 220 T 260 340" fill="none" stroke="url(#track)" stroke-width="1.5"/>
+  <!-- planes (rotated paper-plane glyphs) -->
+  <g transform="translate(760 110) rotate(22)">
+    <path d="M0 -10 L3 4 L12 6 L12 8 L3 8 L2 14 L4 15 L4 16 L0 15 L-4 16 L-4 15 L-2 14 L-3 8 L-12 8 L-12 6 L-3 4 Z" fill="#ff5a24" stroke="#1a1a1f" stroke-width="0.6"/>
+  </g>
+  <g transform="translate(850 240) rotate(95)">
+    <path d="M0 -10 L3 4 L12 6 L12 8 L3 8 L2 14 L4 15 L4 16 L0 15 L-4 16 L-4 15 L-2 14 L-3 8 L-12 8 L-12 6 L-3 4 Z" fill="#ff8a4c" stroke="#1a1a1f" stroke-width="0.6"/>
+  </g>
+  <g transform="translate(260 340) rotate(245)">
+    <path d="M0 -10 L3 4 L12 6 L12 8 L3 8 L2 14 L4 15 L4 16 L0 15 L-4 16 L-4 15 L-2 14 L-3 8 L-12 8 L-12 6 L-3 4 Z" fill="#fbbf77" stroke="#1a1a1f" stroke-width="0.6"/>
+  </g>
+  <!-- satellite -->
+  <g transform="translate(500 90)" opacity="0.9">
+    <rect x="-4" y="-4" width="8" height="8" fill="#9ad4ff"/>
+    <line x1="-4" y1="0" x2="-18" y2="-4" stroke="#9ad4ff" stroke-width="1.5"/>
+    <line x1="-4" y1="0" x2="-18" y2="4" stroke="#9ad4ff" stroke-width="1.5"/>
+    <line x1="4" y1="0" x2="18" y2="-4" stroke="#9ad4ff" stroke-width="1.5"/>
+    <line x1="4" y1="0" x2="18" y2="4" stroke="#9ad4ff" stroke-width="1.5"/>
+  </g>
+  <!-- brand -->
+  <g transform="translate(40 40)" font-family="Inter, system-ui, sans-serif">
+    <circle cx="6" cy="14" r="4" fill="#ff8a4c"/>
+    <text x="18" y="18" fill="#ececef" font-size="14" font-weight="600" letter-spacing="3">SKYLOG</text>
+    <text x="18" y="32" fill="#8a8a96" font-size="9" letter-spacing="1.6">LIVE PLANE &amp; SATELLITE TRACKER</text>
+  </g>
+  <!-- footer -->
+  <text x="20" y="390" fill="#5a5a66" font-family="JetBrains Mono, monospace" font-size="9" letter-spacing="1">
+    opensky-network · celestrak · maplibre-gl · runs entirely client-side · mit
+  </text>
+</svg>

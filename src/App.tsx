@@ -1,21 +1,32 @@
 /**
  * SKYLOG — root component.
  *
- * Mounts the worker once on first home-location, hydrates passes from
- * IndexedDB, and wires the Timeline + LivePanel + DetailPanel + Settings.
+ * Layout:
+ *   - Full-screen LiveMap as the hero.
+ *   - Floating TopBar with brand, layer toggles, search, nav buttons.
+ *   - Click-a-plane opens a right-side FlightCard.
+ *   - Optional drawers: Home setup, historical timeline, settings.
+ *   - "?" key opens a help/about overlay.
+ *
+ * The old home-based pass worker (loudness timeline) is still wired
+ * up, but only started once the user chooses to set a home — it's no
+ * longer a blocker for seeing anything useful.
  */
 
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSky } from "./state/store";
 import { db } from "./lib/db";
+import { LiveMap } from "./components/LiveMap";
+import { FlightCard } from "./components/FlightCard";
 import { HomeSetup } from "./components/HomeSetup";
-import { Timeline, LoudnessLegend } from "./components/Timeline";
-import { LivePanel } from "./components/LivePanel";
+import { TopBar } from "./components/TopBar";
+import { SearchBar } from "./components/SearchBar";
+import { TimelineDrawer } from "./components/TimelineDrawer";
 import { DetailPanel } from "./components/DetailPanel";
 import { SettingsDrawer } from "./components/SettingsDrawer";
-import { EmptyState } from "./components/EmptyState";
-import { formatClock } from "./lib/units";
+import { HelpOverlay } from "./components/HelpOverlay";
 import { loadAircraftDb } from "./lib/aircraftDb";
+import type { StateVector } from "./lib/opensky";
 import type {
   InboundMessage,
   OutboundMessage,
@@ -23,25 +34,42 @@ import type {
 
 export function App(): JSX.Element {
   const home = useSky((s) => s.home);
-  const onboarded = useSky((s) => s.onboarded);
-
-  if (!home || !onboarded) return <HomeSetup />;
-  return <Dashboard />;
-}
-
-function Dashboard(): JSX.Element {
-  const home = useSky((s) => s.home);
-  const radius = useSky((s) => s.radiusMeters);
   const applyMsg = useSky((s) => s.applyWorkerMessage);
   const setInitial = useSky((s) => s.setInitialPasses);
-  const status = useSky((s) => s.status);
-  const setSettingsOpen = useSky((s) => s.setSettingsOpen);
-  const passCount = useSky((s) => Object.keys(s.passes).length);
+  const radius = useSky((s) => s.radiusMeters);
+
+  const [showSatellites, setShowSatellites] = useState<boolean>(false);
+  const [homeSetupOpen, setHomeSetupOpen] = useState<boolean>(false);
+  const [timelineOpen, setTimelineOpen] = useState<boolean>(false);
+  const [helpOpen, setHelpOpen] = useState<boolean>(false);
+  const [selectedLive, setSelectedLive] = useState<StateVector | null>(null);
+  const [focusIcao, setFocusIcao] = useState<string | null>(null);
+  const [visibleAircraft, setVisibleAircraft] = useState<readonly StateVector[]>([]);
 
   const workerRef = useRef<Worker | null>(null);
 
-  // Boot: hydrate persisted passes, start the aircraft DB lazy load,
-  // and spin up the worker.
+  useEffect(() => {
+    loadAircraftDb().catch(() => {
+      /* non-fatal */
+    });
+  }, []);
+
+  /* "?" opens help from anywhere. */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        e.key === "?" &&
+        document.activeElement?.tagName !== "INPUT" &&
+        document.activeElement?.tagName !== "TEXTAREA"
+      ) {
+        setHelpOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  /* Pass-logger worker — only runs when home is set. */
   useEffect(() => {
     if (!home) return;
     let cancelled = false;
@@ -56,12 +84,6 @@ function Dashboard(): JSX.Element {
       /* non-fatal */
     });
 
-    // Kick off the aircraft DB load so the DetailPanel doesn't show "..."
-    // when the first pass arrives.
-    loadAircraftDb().catch(() => {
-      /* non-fatal */
-    });
-
     const w = new Worker(
       new URL("./workers/skyPoller.worker.ts", import.meta.url),
       { type: "module", name: "skylog-poller" }
@@ -72,12 +94,11 @@ function Dashboard(): JSX.Element {
       applyMsg(ev.data);
     });
 
-    const startMsg: InboundMessage = {
+    w.postMessage({
       type: "START",
       home,
       radiusMeters: radius,
-    };
-    w.postMessage(startMsg);
+    } as InboundMessage);
 
     return () => {
       cancelled = true;
@@ -85,10 +106,9 @@ function Dashboard(): JSX.Element {
       w.terminate();
       workerRef.current = null;
     };
-    // We specifically want to re-init when home identity or radius changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [home?.lat, home?.lon]);
 
-  // Send radius updates to the running worker without restarting it.
   useEffect(() => {
     if (!workerRef.current || !home) return;
     workerRef.current.postMessage({
@@ -98,79 +118,68 @@ function Dashboard(): JSX.Element {
     } as InboundMessage);
   }, [radius]);
 
-  const statusText = useMemo(() => {
-    switch (status.kind) {
-      case "idle":
-        return `idle · next poll ${formatClock(status.nextPollAt)}`;
-      case "polling":
-        return `polling · ${status.creditsUsed} credits used today`;
-      case "rate_limited":
-        return `rate-limited · resumes ${formatClock(status.until)}`;
-      case "offline":
-        return "offline · reconnecting";
-      case "error":
-        return `error · ${status.message}`;
-      case "booting":
-        return "starting…";
-    }
-  }, [status]);
+  const handleSelectLive = useCallback((s: StateVector) => {
+    setSelectedLive(s);
+    setFocusIcao(s.icao24);
+  }, []);
+
+  const handleVisibleAircraft = useCallback((states: StateVector[]) => {
+    setVisibleAircraft(states);
+  }, []);
 
   return (
-    <div className="relative min-h-screen bg-ink-950 text-ink-100">
-      {/* header */}
-      <header className="flex items-center justify-between border-b border-ink-800 px-6 py-3">
-        <div className="flex items-center gap-6">
-          <div className="font-mono text-[11px] uppercase tracking-[0.25em] text-ink-100">
-            skylog
-          </div>
-          <div className="font-mono text-[10px] uppercase tracking-wider text-ink-400">
-            {home ? `home ${home.lat.toFixed(3)}, ${home.lon.toFixed(3)}` : ""}
-          </div>
-          <div className="font-mono text-[10px] uppercase tracking-wider text-ink-500">
-            {statusText}
-          </div>
-        </div>
-        <div className="flex items-center gap-6">
-          <LoudnessLegend />
-          <button
-            onClick={() => setSettingsOpen(true)}
-            className="font-mono text-[11px] uppercase tracking-wider text-ink-300 hover:text-accent"
-          >
-            Settings
-          </button>
-        </div>
-      </header>
+    <div className="relative h-screen w-screen overflow-hidden bg-ink-950 text-ink-100">
+      {/* Full-screen live map */}
+      <LiveMap
+        onSelectAircraft={handleSelectLive}
+        selectedIcao24={selectedLive?.icao24 ?? null}
+        showSatellites={showSatellites}
+        focusIcao24={focusIcao}
+        aircraftOut={handleVisibleAircraft}
+      />
 
-      {/* main */}
-      <main className="mx-auto grid w-full max-w-[1600px] grid-cols-1 gap-6 p-6 lg:grid-cols-[1fr_320px]">
-        <section>
-          <div className="mb-3 flex items-baseline justify-between">
-            <h2 className="font-mono text-[11px] uppercase tracking-[0.25em] text-ink-400">
-              last 24 hours · {passCount} pass{passCount === 1 ? "" : "es"}
-            </h2>
-            <p className="font-mono text-[10px] text-ink-500">
-              hover a bar · click to open · ← → to scrub · esc to close
-            </p>
-          </div>
-          <div className="rounded border border-ink-800 bg-ink-900/50 p-3">
-            {passCount === 0 ? <EmptyState /> : <Timeline />}
-          </div>
+      {/* Floating top bar */}
+      <TopBar
+        showSatellites={showSatellites}
+        onToggleSatellites={() => setShowSatellites((v) => !v)}
+        onOpenHomeSetup={() => setHomeSetupOpen(true)}
+        onOpenTimeline={() => setTimelineOpen(true)}
+        onOpenHelp={() => setHelpOpen(true)}
+      >
+        <SearchBar
+          visible={visibleAircraft}
+          onPick={(s) => {
+            handleSelectLive(s);
+          }}
+        />
+      </TopBar>
 
-          <div className="mt-6 font-mono text-[10px] uppercase tracking-wider text-ink-500">
-            <p>
-              loudness is an estimate from an on-device model. color is not a
-              measurement — it's the inverse-square law plus atmospheric
-              absorption, applied to an aircraft-category source level.
-            </p>
-          </div>
-        </section>
+      {/* Click-a-plane card */}
+      {selectedLive && (
+        <FlightCard
+          state={selectedLive}
+          onClose={() => {
+            setSelectedLive(null);
+            setFocusIcao(null);
+          }}
+        />
+      )}
 
-        <aside className="space-y-6">
-          <LivePanel />
-        </aside>
-      </main>
-
+      {/* Historical pass detail panel (opens from the timeline drawer). */}
       <DetailPanel />
+
+      {/* Optional drawers */}
+      {homeSetupOpen && (
+        <HomeSetup
+          onDone={() => setHomeSetupOpen(false)}
+          onCancel={() => setHomeSetupOpen(false)}
+        />
+      )}
+      {timelineOpen && (
+        <TimelineDrawer onClose={() => setTimelineOpen(false)} />
+      )}
+      {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
+
       <SettingsDrawer />
     </div>
   );
