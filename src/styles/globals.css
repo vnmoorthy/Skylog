@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * SKYLOG global styles.
+ * Inter + JetBrains Mono are loaded from Google Fonts in index.html.
+ */
+
+:root {
+  color-scheme: dark;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  background: #0a0a0b;
+  color: #ececef;
+  font-family: var(--font-sans);
+}
+
+html {
+  font-variant-numeric: tabular-nums;
+}
+
+/* MapLibre overrides: keep it flat, no rounded corners, black backdrop. */
+.maplibregl-canvas-container canvas {
+  outline: none;
+}
+.maplibregl-ctrl-attrib {
+  background: rgba(15, 15, 18, 0.7) !important;
+  color: #8a8a96 !important;
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+.maplibregl-ctrl-attrib a {
+  color: #b4b4bd !important;
+}
+
+/* Hide the default focus ring on SVG rect buttons inside the Timeline; we
+   render our own "selected" treatment with strokes. */
+svg rect:focus,
+svg rect:focus-visible {
+  outline: none;
+}
+
+/* Make sure native input ranges pick up the accent. */
+input[type="range"] {
+  accent-color: #ff8a4c;
+  background: transparent;
+}
+
+/* Chrome-ish scrollbar for the dark theme. */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0a0b;
+}
+::-webkit-scrollbar-thumb {
+  background: #27272f;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a44;
+}

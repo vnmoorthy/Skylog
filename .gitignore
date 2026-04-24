@@ -1,0 +1,10 @@
+node_modules
+.next
+.env
+.env.local
+*.log
+dist
+.DS_Store
+coverage
+.vite
+public/data/*.json.gz
