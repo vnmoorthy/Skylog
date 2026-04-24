@@ -199,7 +199,13 @@ export const LiveMap = forwardRef<LiveMapHandle, LiveMapProps>(function LiveMap(
       // sometimes drift the camera, leaving the user zoomed out past
       // the live-feed's bbox cap.
       const m = mapRef.current;
-      if (m) m.jumpTo({ center: initialCenter, zoom: initialZoom });
+      if (m) {
+        m.jumpTo({ center: initialCenter, zoom: initialZoom });
+        // Nudge the poller to re-check with the fresh bbox. moveend
+        // fires only if the camera actually moves; we fire it explicitly
+        // so the status badge updates even when jumpTo is a no-op.
+        m.fire("moveend");
+      }
     }, 12_000);
     const onSourceData = (): void => {
       // First basemap tile arrival — flush a resize in case the
