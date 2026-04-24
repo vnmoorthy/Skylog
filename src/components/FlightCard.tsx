@@ -70,16 +70,21 @@ export function FlightCard({ state, onClose }: FlightCardProps): JSX.Element {
               : ""}
           </p>
           <h3 className="mt-0.5 text-lg font-semibold text-ink-100">{title}</h3>
-          {ac ? (
+          {state._aircraftDesc || ac ? (
             <p className="mt-1 text-xs text-ink-300">
-              {ac.manufacturer ? `${ac.manufacturer} ` : ""}
-              {ac.model ?? ac.typecode ?? "Unknown type"}
-              {ac.registration ? ` · ${ac.registration}` : ""}
+              {state._aircraftDesc ?? `${ac?.manufacturer ? ac.manufacturer + " " : ""}${ac?.model ?? ac?.typecode ?? "Unknown type"}`}
+              {state._registration
+                ? ` · ${state._registration}`
+                : ac?.registration
+                ? ` · ${ac.registration}`
+                : ""}
             </p>
           ) : state.originCountry ? (
             <p className="mt-1 text-xs text-ink-400">Registered {state.originCountry}</p>
           ) : null}
-          {ac?.operator ? (
+          {state._operator ? (
+            <p className="text-xs text-ink-400">{state._operator}</p>
+          ) : ac?.operator ? (
             <p className="text-xs text-ink-400">{ac.operator}</p>
           ) : null}
         </div>

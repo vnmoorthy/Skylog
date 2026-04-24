@@ -44,6 +44,11 @@ export interface StateVector {
   readonly geoAltitudeM: number | null;
   readonly squawk: string | null;
   readonly spi: boolean;
+  // Optional enrichment provided by some sources (airplanes.live).
+  readonly _registration?: string | null;
+  readonly _typeCode?: string | null;
+  readonly _aircraftDesc?: string | null;
+  readonly _operator?: string | null;
   readonly positionSource: number;
   readonly category: number | null;
 }
