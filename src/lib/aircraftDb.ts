@@ -27,7 +27,7 @@ interface BuiltAircraft {
 let memCache: Map<string, BuiltAircraft> | null = null;
 let loadPromise: Promise<Map<string, BuiltAircraft>> | null = null;
 
-const SOURCE_URL = "/data/aircraft.json.gz";
+const SOURCE_URL = (import.meta.env.BASE_URL ?? "/") + "data/aircraft.json.gz";
 
 async function fetchAndDecompress(url: string): Promise<Record<string, BuiltAircraft>> {
   const res = await fetch(url);

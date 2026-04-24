@@ -22,7 +22,7 @@ let memCache: Map<string, BuiltAirport> | null = null;
 let iataIndex: Map<string, string> | null = null;
 let loadPromise: Promise<Map<string, BuiltAirport>> | null = null;
 
-const SOURCE_URL = "/data/airports.json.gz";
+const SOURCE_URL = ((import.meta.env.BASE_URL ?? "/") + "data/airports.json.gz");
 
 async function fetchAndDecompress(url: string): Promise<Record<string, BuiltAirport>> {
   const res = await fetch(url);

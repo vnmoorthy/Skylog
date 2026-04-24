@@ -84,37 +84,37 @@ const SAT_SVG = `
 </svg>`;
 
 /**
- * CartoDB dark_all raster basemap. Free to use with attribution, hosted
- * on a fast CDN, no API key. The saturation/contrast tweaks keep our
- * overlays (plane markers, trails) legible without washing the basemap
- * out entirely.
+ * Minimal raster-only dark basemap. CartoDB `dark_all` OSM tiles at 2x
+ * (retina-friendly), a solid near-black background under them so tile
+ * fade-in doesn't flash white, and nothing else — we keep the style
+ * deliberately tiny so style-parsing can't silently fail in prod.
  */
 const STYLE_DARK: StyleSpecification = {
   version: 8,
-  glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
   sources: {
     basemap: {
       type: "raster",
       tiles: [
-        "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-        "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-        "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-        "https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+        "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
+        "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
+        "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
+        "https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
       ],
       tileSize: 256,
       attribution:
-        '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> contributors, © <a href="https://carto.com/attributions">CARTO</a>',
-      minzoom: 0,
-      maxzoom: 20,
+        '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> contributors, &copy; <a href="https://carto.com/attributions">CARTO</a>',
     },
   },
   layers: [
-    { id: "bg", type: "background", paint: { "background-color": "#0a0a0b" } },
+    {
+      id: "background",
+      type: "background",
+      paint: { "background-color": "#0a0a0b" },
+    },
     {
       id: "basemap",
       type: "raster",
       source: "basemap",
-      paint: { "raster-opacity": 0.9, "raster-contrast": -0.05 },
     },
   ],
 };
@@ -187,6 +187,10 @@ export function LiveMap({
       attributionControl: { compact: true },
     });
     mapRef.current = map;
+    map.on("error", (e) => {
+      // eslint-disable-next-line no-console
+      console.warn("maplibre error:", (e as { error?: { message?: string } }).error?.message ?? e);
+    });
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "top-right");
 
     map.on("load", () => {
