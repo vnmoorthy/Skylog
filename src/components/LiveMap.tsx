@@ -189,8 +189,19 @@ export function LiveMap({
     mapRef.current = map;
     // Expose for devtools debugging.
     (window as unknown as { __skylogMap?: MlMap }).__skylogMap = map;
-    // Force a resize tick on next frame — guards against 0-size mount races.
-    requestAnimationFrame(() => map.resize());
+    // MapLibre can latch onto a 0x0 container size when mounted inside a flex
+    // layout that hasn't finished its initial pass. We force a resize
+    // immediately, again on load, and trigger a manual repaint on first idle
+    // so the canvas never stays blank.
+    map.resize();
+    map.once("load", () => {
+      map.resize();
+      map.triggerRepaint();
+    });
+    map.once("idle", () => {
+      map.resize();
+      map.triggerRepaint();
+    });
     map.on("error", (e) => {
       // eslint-disable-next-line no-console
       console.warn("maplibre error:", (e as { error?: { message?: string } }).error?.message ?? e);
