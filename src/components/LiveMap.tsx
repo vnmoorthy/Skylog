@@ -191,22 +191,25 @@ export function LiveMap({
     (window as unknown as { __skylogMap?: MlMap }).__skylogMap = map;
     // MapLibre occasionally latches onto a stale container size when
     // mounted inside a React tree that re-lays out during hydration,
-    // leaving the WebGL canvas blank. The single trustworthy fix we
-    // have found is to schedule a handful of resize+triggerRepaint
-    // passes across the first second of the map's life. It is cheap.
-    const kickTimers: ReturnType<typeof setTimeout>[] = [];
-    const kick = () => {
-      if (!mapRef.current) return;
-      mapRef.current.resize();
-      mapRef.current.triggerRepaint();
-    };
-    kickTimers.push(setTimeout(kick, 0));
-    kickTimers.push(setTimeout(kick, 100));
-    kickTimers.push(setTimeout(kick, 500));
-    kickTimers.push(setTimeout(kick, 1500));
+    // leaving the WebGL canvas blank. For the first few seconds of the
+    // map's life we continually trigger a repaint — enough of those
+    // land on a frame where the tiles have loaded and the size is real.
+    // After that we rely on the natural moveend / sourcedata events.
+    const pollInterval = setInterval(() => {
+      const m = mapRef.current;
+      if (!m) return;
+      m.resize();
+      m.triggerRepaint();
+    }, 150);
+    const stopPoll = setTimeout(() => clearInterval(pollInterval), 4000);
     // Also wire a ResizeObserver on the container so the map stays sharp
     // when the browser window changes size.
-    const ro = new ResizeObserver(kick);
+    const ro = new ResizeObserver(() => {
+      const m = mapRef.current;
+      if (!m) return;
+      m.resize();
+      m.triggerRepaint();
+    });
     if (container.current) ro.observe(container.current);
     map.on("error", (e) => {
       // eslint-disable-next-line no-console
@@ -268,7 +271,8 @@ export function LiveMap({
     });
 
     return () => {
-      for (const t of kickTimers) clearTimeout(t);
+      clearInterval(pollInterval);
+      clearTimeout(stopPoll);
       ro.disconnect();
       map.remove();
       mapRef.current = null;
