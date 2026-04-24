@@ -64,54 +64,30 @@ interface SatMarkerRef {
 
 const DARK_STYLE: maplibregl.StyleSpecification = {
   version: 8,
-  glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
   sources: {
-    // CARTO's "dark matter (no labels)" basemap — free, CORS-safe, designed for this
-    // exact use case (data viz over geography). We'll overlay our own sparse
-    // labels via MapLibre's symbol layer later if we ever need them.
-    carto: {
+    basemap: {
       type: "raster",
       tiles: [
-        "https://a.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}@2x.png",
-        "https://b.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}@2x.png",
-        "https://c.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}@2x.png",
-        "https://d.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}@2x.png",
+        "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+        "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+        "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+        "https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
       ],
       tileSize: 256,
       attribution:
-        "© <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors © <a href=\"https://carto.com/attributions\">CARTO</a>",
-    },
-    // Carto's label-only layer, so we can mix "dark + labels" nicely.
-    cartoLabels: {
-      type: "raster",
-      tiles: [
-        "https://a.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}@2x.png",
-        "https://b.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}@2x.png",
-        "https://c.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}@2x.png",
-        "https://d.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}@2x.png",
-      ],
-      tileSize: 256,
+        '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> contributors, &copy; <a href="https://carto.com/attributions">CARTO</a>',
     },
   },
   layers: [
-    { id: "bg", type: "background", paint: { "background-color": "#0a0a0b" } },
+    {
+      id: "background",
+      type: "background",
+      paint: { "background-color": "#0a0a0b" },
+    },
     {
       id: "basemap",
       type: "raster",
-      source: "carto",
-      paint: {
-        "raster-opacity": 0.82,
-        "raster-saturation": -0.05,
-        "raster-contrast": 0.08,
-      },
-    },
-    {
-      id: "basemap-labels",
-      type: "raster",
-      source: "cartoLabels",
-      paint: {
-        "raster-opacity": 0.65,
-      },
+      source: "basemap",
     },
   ],
 };
@@ -185,7 +161,34 @@ export function LiveMap({
       attributionControl: { compact: true },
     });
     mapRef.current = map;
+    (window as unknown as { __skylogMap?: MlMap }).__skylogMap = map;
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "top-right");
+
+    // MapLibre occasionally latches onto a stale container size when
+    // mounted inside a React tree that re-lays out during hydration,
+    // leaving the WebGL canvas blank. For the first ~4 s of map life we
+    // continually trigger a repaint — enough of those land on a frame
+    // where the tiles have loaded and the size is real. After that we
+    // rely on natural moveend / sourcedata events.
+    const bootPoll = setInterval(() => {
+      const m = mapRef.current;
+      if (!m) return;
+      m.resize();
+      m.triggerRepaint();
+    }, 150);
+    const stopBootPoll = setTimeout(() => clearInterval(bootPoll), 4000);
+    // ResizeObserver keeps the canvas sharp through later window resizes.
+    const ro = new ResizeObserver(() => {
+      const m = mapRef.current;
+      if (!m) return;
+      m.resize();
+      m.triggerRepaint();
+    });
+    if (container.current) ro.observe(container.current);
+    map.on("error", (e) => {
+      // eslint-disable-next-line no-console
+      console.warn("MapLibre:", e);
+    });
 
     map.on("load", () => {
       // Trails: one GeoJSON source, one line layer.
@@ -259,6 +262,9 @@ export function LiveMap({
     });
 
     return () => {
+      clearInterval(bootPoll);
+      clearTimeout(stopBootPoll);
+      ro.disconnect();
       map.remove();
       mapRef.current = null;
       markersRef.current.clear();
@@ -301,7 +307,7 @@ export function LiveMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* -------------------- poll OpenSky -------------------- */
+  /* -------------------- poll live feed -------------------- */
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;

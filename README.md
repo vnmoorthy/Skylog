@@ -10,8 +10,8 @@ Flight trackers are optimised for airline route-planners, not curious humans. Th
 
 ## Features
 
-- **Live map as the first screen.** No onboarding gate. Open the page, the map centers on your location if you grant geolocation, otherwise a busy default (NYC), and OpenSky's global feed populates the viewport in under five seconds.
-- **Smooth motion between polls.** OpenSky returns a snapshot every ten seconds; Skylog dead-reckons each aircraft's position at 10 Hz using its broadcast velocity and track, so planes move smoothly instead of teleporting.
+- **Live map as the first screen.** No onboarding gate. Open the page, the map centers on your location if you grant geolocation, otherwise a busy default (NYC), and the airplanes.live global feed populates the viewport in under five seconds.
+- **Smooth motion between polls.** The feed returns a snapshot every ten seconds; Skylog dead-reckons each aircraft's position at 10 Hz using its broadcast velocity and track, so planes move smoothly instead of teleporting.
 - **Click-to-identify.** Tap any aircraft for airline, callsign, aircraft type, registration, altitude, speed, heading, squawk, and data source. Aircraft metadata is resolved client-side against a bundled compact JSON built from the OpenSky aircraft database.
 - **Nearest-to-home indicator.** When you have a home set, the bottom-left corner always shows the three nearest aircraft ranked by distance — click to jump to their detail card.
 - **Aircraft list (shortcut `l`).** Sortable, searchable list of every plane in view. Filter by callsign, ICAO24, or country. Sort by altitude or distance from home.
@@ -169,7 +169,8 @@ MIT. See [`LICENSE`](./LICENSE).
 
 ## Acknowledgements
 
-- [OpenSky Network](https://opensky-network.org/) — the ADS-B state feed.
+- [airplanes.live](https://airplanes.live/) — the CORS-friendly live ADS-B feed.
+- [OpenSky Network](https://opensky-network.org/) — historical pass-logger feed and the aircraft metadata DB.
 - [Celestrak](https://celestrak.org/) — satellite TLEs.
 - [CARTO](https://carto.com/) — dark basemap tiles.
 - [MapLibre](https://maplibre.org/) — open map renderer.

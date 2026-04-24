@@ -31,9 +31,29 @@ interface FlightCardProps {
 export function FlightCard({ state, onClose }: FlightCardProps): JSX.Element {
   const units = useSky((s) => s.units) as UnitSystem;
   const home = useSky((s) => s.home);
+  // Prefer enrichment fields carried on the state vector (airplanes.live
+  // includes them); fall back to async aircraft-DB lookup for OpenSky-style
+  // payloads that lack them.
   const [ac, setAc] = useState<AircraftInfo | null>(null);
 
+  const enriched: AircraftInfo | null =
+    state._registration || state._typeCode || state._aircraftDesc || state._operator
+      ? {
+          icao24: state.icao24,
+          registration: state._registration ?? null,
+          manufacturer: state._aircraftDesc ?? null,
+          model: null,
+          typecode: state._typeCode ?? null,
+          operator: state._operator ?? null,
+          built: null,
+        }
+      : null;
+
   useEffect(() => {
+    if (enriched) {
+      setAc(enriched);
+      return;
+    }
     let cancelled = false;
     setAc(null);
     lookupAircraft(state.icao24)
@@ -46,7 +66,8 @@ export function FlightCard({ state, onClose }: FlightCardProps): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [state.icao24]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.icao24, enriched?.registration, enriched?.typecode]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {

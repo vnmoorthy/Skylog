@@ -53,12 +53,12 @@ export function HelpModal({ open, onClose }: HelpModalProps): JSX.Element | null
           Every orange triangle on the map is a real aircraft, reporting its
           position over ADS-B. Data comes from{" "}
           <a
-            href="https://opensky-network.org"
+            href="https://airplanes.live"
             target="_blank"
             rel="noreferrer"
             className="text-accent underline"
           >
-            OpenSky Network
+            airplanes.live
           </a>
           . Click a plane for its registration, type, and altitude. Set a home
           location to log passes over time and estimate ground-level loudness.
@@ -91,7 +91,7 @@ export function HelpModal({ open, onClose }: HelpModalProps): JSX.Element | null
         </section>
 
         <p className="mt-6 font-mono text-[10px] uppercase tracking-wider text-ink-500">
-          built with · opensky · carto · maplibre · dexie · satellite.js
+          built with · airplanes.live · opensky · carto · maplibre · dexie · satellite.js
         </p>
       </div>
     </div>
