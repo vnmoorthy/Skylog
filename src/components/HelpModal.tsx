@@ -69,6 +69,7 @@ export function HelpModal({ open, onClose }: HelpModalProps): JSX.Element | null
             keyboard shortcuts
           </h3>
           <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-xs">
+            <Shortcut k="c" label="toggle light/dark theme" />
             <Shortcut k="f" label="track a flight by number" />
             <Shortcut k="m" label="open aircraft memory" />
             <Shortcut k="s" label="toggle satellites" />

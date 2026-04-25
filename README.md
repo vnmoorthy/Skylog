@@ -186,6 +186,7 @@ What the model deliberately doesn't do: ground reflection, directivity, thrust m
 
 | Key | Action |
 | --- | --- |
+| `c` | Toggle light/dark theme |
 | `f` | Track a specific flight by callsign |
 | `m` | Open the aircraft memory drawer |
 | `s` | Toggle satellite overlay |

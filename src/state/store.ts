@@ -23,6 +23,8 @@ export type ConnectivityStatus =
   | { kind: "offline"; creditsUsed: number; nextPollAt: number }
   | { kind: "error"; message: string; creditsUsed: number };
 
+export type Theme = "light" | "dark"
+
 /* ---- persisted slice ---- */
 
 export interface Preferences {
@@ -31,6 +33,7 @@ export interface Preferences {
   readonly units: UnitSystem;
   /** Dismissed the first-run onboarding screen at least once. */
   readonly onboarded: boolean;
+  readonly theme: Theme;
 }
 
 const DEFAULT_PREFS: Preferences = {
@@ -38,6 +41,7 @@ const DEFAULT_PREFS: Preferences = {
   radiusMeters: 25_000,
   units: "imperial",
   onboarded: false,
+  theme: "dark"
 };
 
 /* ---- ephemeral slice ---- */
@@ -64,6 +68,8 @@ export interface SkyStore extends Preferences, RuntimeState {
 
   applyWorkerMessage: (msg: OutboundMessage) => void;
   setInitialPasses: (passes: AircraftPass[]) => void;
+
+  toggleTheme: () => void;
 
   selectPass: (passId: string | null) => void;
   setSettingsOpen: (open: boolean) => void;
@@ -146,6 +152,10 @@ export const useSky = create<SkyStore>()(
             return;
         }
       },
+
+      toggleTheme: () => set((s) => ({ 
+        theme: s.theme === "dark" ? "light" : "dark" 
+      })),
     }),
     {
       name: "skylog/prefs/v1",
@@ -155,6 +165,7 @@ export const useSky = create<SkyStore>()(
         radiusMeters: s.radiusMeters,
         units: s.units,
         onboarded: s.onboarded,
+        theme: s.theme,
       }),
     }
   )
