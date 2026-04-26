@@ -30,15 +30,13 @@ import maplibregl, {
 import { startLivePoller, type LivePollStatus } from "../lib/livePoller";
 import type { BBox } from "../lib/geo";
 import type { StateVector } from "../lib/opensky";
-import {
-  fetchSatellites,
-  propagateAll,
-  groundTrack,
-  type ParsedSat,
-  type SatPosition,
-} from "../lib/satellites";
+// Satellite helpers are loaded lazily inside the satellite useEffect to
+// keep the initial bundle small. The types are still referenced at compile
+// time but tsc will strip them at runtime.
+import type { ParsedSat, SatPosition } from "../lib/satellites";
 import { extrapolate } from "../lib/deadReckon";
 import { recordSightings } from "../lib/sightings";
+import { statePassesFilter, type AltitudeBand, type CategoryFilter } from "./FilterBar";
 import { useSky } from "../state/store";
 
 interface LiveMapProps {
@@ -46,6 +44,10 @@ interface LiveMapProps {
   selectedIcao24: string | null;
   showSatellites: boolean;
   onAircraftListChange: (list: readonly StateVector[]) => void;
+  /** When > 0, replay the sky from (now - replayOffsetSec) instead of now. */
+  replayOffsetSec: number;
+  altitudeBand: AltitudeBand;
+  categoryFilter: CategoryFilter;
 }
 
 interface PlaneMarkerRef {
@@ -53,11 +55,13 @@ interface PlaneMarkerRef {
   iconEl: HTMLDivElement;
   state: StateVector;
   anchorAt: number;
-  trail: Array<[number, number]>; // [lon, lat]
+  trail: Array<[number, number, number]>; // [lon, lat, ts]
   /** Last colour applied to the icon — used to avoid re-styling when unchanged. */
   lastColor: string;
   /** Last heading in degrees — used to skip tiny transform updates. */
   lastHeading: number;
+  /** Timestamp of the last position update — for time-machine replay. */
+  lastAt: number;
 }
 
 interface SatMarkerRef {
@@ -135,7 +139,7 @@ export interface LiveMapHandle {
 }
 
 export const LiveMap = forwardRef<LiveMapHandle, LiveMapProps>(function LiveMap(
-  { onSelectAircraft, selectedIcao24, showSatellites, onAircraftListChange },
+  { onSelectAircraft, selectedIcao24, showSatellites, onAircraftListChange, replayOffsetSec, altitudeBand, categoryFilter },
   ref
 ): JSX.Element {
   const container = useRef<HTMLDivElement | null>(null);
@@ -144,6 +148,7 @@ export const LiveMap = forwardRef<LiveMapHandle, LiveMapProps>(function LiveMap(
   const satMarkersRef = useRef<Map<string, SatMarkerRef>>(new Map());
   const sourcesReady = useRef(false);
   const rafRef = useRef<number | null>(null);
+  const replayRef = useRef<number>(0);
 
   const home = useSky((s) => s.home);
   const radiusM = useSky((s) => s.radiusMeters);
@@ -202,15 +207,15 @@ export const LiveMap = forwardRef<LiveMapHandle, LiveMapProps>(function LiveMap(
     const bootPoll = setInterval(kickMap, 100);
     const stopBootPoll = setTimeout(() => {
       clearInterval(bootPoll);
-      // Lock in the intended viewport — the rapid resizes during boot
-      // sometimes drift the camera, leaving the user zoomed out past
-      // the live-feed's bbox cap.
       const m = mapRef.current;
       if (m) {
         m.jumpTo({ center: initialCenter, zoom: initialZoom });
-        // Nudge the poller to re-check with the fresh bbox. moveend
-        // fires only if the camera actually moves; we fire it explicitly
-        // so the status badge updates even when jumpTo is a no-op.
+        // Pan-jiggle: a 1-pixel pan and back forces MapLibre to
+        // re-evaluate which tiles it needs for the *current* canvas
+        // size. Without this, on slow boots the map renders only the
+        // tiles it had decided on at 0×0 canvas and never recovers.
+        m.panBy([1, 0], { duration: 0 });
+        m.panBy([-1, 0], { duration: 0 });
         m.fire("moveend");
       }
     }, 12_000);
@@ -254,6 +259,23 @@ export const LiveMap = forwardRef<LiveMapHandle, LiveMapProps>(function LiveMap(
           "line-color": "#ff8a4c",
           "line-opacity": 0.45,
           "line-width": 1.1,
+        },
+      });
+
+      // Projected heading line for the currently-selected aircraft.
+      map.addSource("projection", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addLayer({
+        id: "projection",
+        type: "line",
+        source: "projection",
+        paint: {
+          "line-color": "#ff8a4c",
+          "line-opacity": 0.8,
+          "line-width": 2,
+          "line-dasharray": [2, 2],
         },
       });
 
@@ -374,12 +396,16 @@ export const LiveMap = forwardRef<LiveMapHandle, LiveMapProps>(function LiveMap(
     };
 
     const handleStates = (states: StateVector[]): void => {
-      onAircraftListChange(states);
-      applyPoll(map, markersRef.current, states, onSelectAircraft);
-      setAircraftCount(states.length);
-      // Fold sightings into the gbrain-style persistent memory. Fire and
-      // forget — the UI doesn't wait on the write.
+      // Always record every sighting (memory should be unbiased by UI filters).
       void recordSightings(states);
+      // Always pass the full list to App so the list panel + overhead show truth.
+      onAircraftListChange(states);
+      // But apply UI filter to what's drawn on the map.
+      const visible = states.filter((s) =>
+        statePassesFilter(s, altitudeBand, categoryFilter)
+      );
+      applyPoll(map, markersRef.current, visible, onSelectAircraft);
+      setAircraftCount(visible.length);
     };
 
     const poller = startLivePoller(readBBox(), handleStates, setStatus);
@@ -390,7 +416,12 @@ export const LiveMap = forwardRef<LiveMapHandle, LiveMapProps>(function LiveMap(
       poller.stop();
       map.off("moveend", onMoveEnd);
     };
-  }, [onSelectAircraft, onAircraftListChange]);
+  }, [onSelectAircraft, onAircraftListChange, altitudeBand, categoryFilter]);
+
+  // Keep the replay ref in sync with the prop so the rAF loop sees fresh values.
+  useEffect(() => {
+    replayRef.current = replayOffsetSec;
+  }, [replayOffsetSec]);
 
   /* -------------------- animation loop -------------------- */
   useEffect(() => {
@@ -400,7 +431,7 @@ export const LiveMap = forwardRef<LiveMapHandle, LiveMapProps>(function LiveMap(
     const step = (now: number): void => {
       if (now - lastFrame > 100) {
         lastFrame = now;
-        tickDeadReckoning(map, markersRef.current, sourcesReady, selectedIcao24);
+        tickDeadReckoning(map, markersRef.current, sourcesReady, selectedIcao24, replayRef.current);
       }
       rafRef.current = requestAnimationFrame(step);
     };
@@ -427,15 +458,19 @@ export const LiveMap = forwardRef<LiveMapHandle, LiveMapProps>(function LiveMap(
     let timer: ReturnType<typeof setInterval> | null = null;
 
     (async () => {
+      // Dynamic import: pulls satellite.js + the satellites helpers into
+      // a separate chunk that only loads when the user toggles satellites.
+      const satMod = await import("../lib/satellites").catch(() => null);
+      if (!satMod || cancelled) return;
       try {
-        sats = await fetchSatellites("stations");
+        sats = await satMod.fetchSatellites("stations");
       } catch {
         return;
       }
       if (cancelled) return;
       const tick = (): void => {
         if (cancelled) return;
-        const positions = propagateAll(sats, new Date());
+        const positions = satMod.propagateAll(sats, new Date());
         renderSatellites(
           map,
           satMarkersRef.current,
@@ -444,12 +479,12 @@ export const LiveMap = forwardRef<LiveMapHandle, LiveMapProps>(function LiveMap(
           (satId) => {
             selectedSatId = satId;
             const selected = sats.find((s) => s.id === satId);
-            if (selected) drawSatTrack(map, selected);
+            if (selected) drawSatTrack(map, selected, satMod.groundTrack);
           }
         );
         if (selectedSatId) {
           const sel = sats.find((s) => s.id === selectedSatId);
-          if (sel) drawSatTrack(map, sel);
+          if (sel) drawSatTrack(map, sel, satMod.groundTrack);
         }
         setSatCount(positions.length);
       };
@@ -569,9 +604,10 @@ function applyPoll(
       // Extend the trail only when the plane actually moved (≈10 m).
       const last = existing.trail[existing.trail.length - 1];
       if (!last || Math.hypot(last[0] - s.longitude, last[1] - s.latitude) > 0.0001) {
-        existing.trail.push([s.longitude, s.latitude]);
-        if (existing.trail.length > 8) existing.trail.shift();
+        existing.trail.push([s.longitude, s.latitude, now]);
+        if (existing.trail.length > 60) existing.trail.shift();
       }
+      existing.lastAt = now;
       existing.state = s;
       existing.anchorAt = now;
     } else {
@@ -604,9 +640,10 @@ function applyPoll(
         iconEl,
         state: s,
         anchorAt: now,
-        trail: [[s.longitude, s.latitude]],
+        trail: [[s.longitude, s.latitude, now]],
         lastColor: color,
         lastHeading: heading,
+        lastAt: now,
       });
     }
   }
@@ -623,26 +660,42 @@ function tickDeadReckoning(
   map: MlMap,
   markers: Map<string, PlaneMarkerRef>,
   sourcesReady: React.MutableRefObject<boolean>,
-  selectedIcao24: string | null
+  selectedIcao24: string | null,
+  replayOffsetSec: number = 0
 ): void {
   const now = Date.now();
+  const replayAt = replayOffsetSec > 0 ? now - replayOffsetSec * 1000 : 0;
   const features: GeoJSON.Feature[] = [];
 
   for (const ref of markers.values()) {
     const s = ref.state;
     if (s.latitude == null || s.longitude == null) continue;
-    if (s.velocityMps != null && s.trackDeg != null && s.velocityMps > 0 && !s.onGround) {
-      const [newLat, newLon] = extrapolate(
-        {
-          lat: s.latitude,
-          lon: s.longitude,
-          speedMps: s.velocityMps,
-          trackDeg: s.trackDeg,
-          anchorAt: ref.anchorAt,
-        },
-        now
-      );
-      ref.marker.setLngLat([newLon, newLat]);
+    if (replayAt > 0) {
+      // Replay mode: position each marker at the trail sample nearest to replayAt.
+      const sample = nearestTrailSample(ref.trail, replayAt);
+      if (sample) {
+        ref.marker.setLngLat([sample[0], sample[1]]);
+        // Dim aged markers a touch so user can tell live vs replay.
+        ref.iconEl.style.opacity = "0.85";
+      } else {
+        // No trail data that old — hide the marker for the duration of the replay frame.
+        ref.iconEl.style.opacity = "0.15";
+      }
+    } else {
+      ref.iconEl.style.opacity = "1";
+      if (s.velocityMps != null && s.trackDeg != null && s.velocityMps > 0 && !s.onGround) {
+        const [newLat, newLon] = extrapolate(
+          {
+            lat: s.latitude,
+            lon: s.longitude,
+            speedMps: s.velocityMps,
+            trackDeg: s.trackDeg,
+            anchorAt: ref.anchorAt,
+          },
+          now
+        );
+        ref.marker.setLngLat([newLon, newLat]);
+      }
     }
     // Highlight the selected plane.
     const isSelected = selectedIcao24 != null && s.icao24 === selectedIcao24;
@@ -657,7 +710,10 @@ function tickDeadReckoning(
           icao24: s.icao24,
           selected: isSelected,
         },
-        geometry: { type: "LineString", coordinates: ref.trail },
+        geometry: {
+          type: "LineString",
+          coordinates: ref.trail.map((p) => [p[0], p[1]]),
+        },
       });
     }
   }
@@ -665,6 +721,53 @@ function tickDeadReckoning(
   if (sourcesReady.current) {
     const src = map.getSource("trails") as maplibregl.GeoJSONSource | undefined;
     src?.setData({ type: "FeatureCollection", features });
+
+    // Update the projection line for the selected aircraft.
+    const projSrc = map.getSource("projection") as maplibregl.GeoJSONSource | undefined;
+    if (projSrc) {
+      let projData: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+      if (selectedIcao24) {
+        const ref = markers.get(selectedIcao24);
+        if (
+          ref &&
+          ref.state.latitude != null &&
+          ref.state.longitude != null &&
+          ref.state.velocityMps != null &&
+          ref.state.trackDeg != null &&
+          ref.state.velocityMps > 0
+        ) {
+          // 5-minute heading projection.
+          const distM = ref.state.velocityMps * 300;
+          const trackRad = (ref.state.trackDeg * Math.PI) / 180;
+          const dLatM = Math.cos(trackRad) * distM;
+          const dLonM = Math.sin(trackRad) * distM;
+          const dLat = dLatM / 111_320;
+          const dLon =
+            dLonM /
+            Math.max(0.001, 111_320 * Math.cos((ref.state.latitude * Math.PI) / 180));
+          const target: [number, number] = [
+            ref.state.longitude + dLon,
+            ref.state.latitude + dLat,
+          ];
+          // Live (or replay) position is what the marker is rendering.
+          const here = ref.marker.getLngLat();
+          projData = {
+            type: "FeatureCollection",
+            features: [
+              {
+                type: "Feature",
+                properties: {},
+                geometry: {
+                  type: "LineString",
+                  coordinates: [[here.lng, here.lat], target],
+                },
+              },
+            ],
+          };
+        }
+      }
+      projSrc.setData(projData);
+    }
   }
 }
 
@@ -708,7 +811,11 @@ function renderSatellites(
   }
 }
 
-function drawSatTrack(map: MlMap, sat: ParsedSat): void {
+function drawSatTrack(
+  map: MlMap,
+  sat: ParsedSat,
+  groundTrack: (sat: ParsedSat, fromMs: number, steps: number, stepMs: number) => Array<[number, number]>
+): void {
   const now = Date.now();
   const stepMs = 30_000;
   const stepsAhead = 180; // 90 min
@@ -753,6 +860,8 @@ function StatusBadge({
       ? "text-accent"
       : status.kind === "loading"
       ? "text-ink-400"
+      : status.kind === "delayed"
+      ? "text-ink-300"
       : "text-ink-200";
 
   let text: string;
@@ -766,11 +875,16 @@ function StatusBadge({
     case "empty":
       text = "No aircraft in view — pan or zoom to busier airspace";
       break;
+    case "delayed": {
+      const ago = Math.max(1, Math.round((Date.now() - status.lastGoodAt) / 1000));
+      text = `${status.lastCount} aircraft · live feed delayed (${ago}s)`;
+      break;
+    }
     case "too_wide":
       text = "Zoom in to load aircraft";
       break;
     case "rate_limited":
-      text = "OpenSky rate-limited — retrying";
+      text = "Live feed rate-limited — retrying";
       break;
     case "offline":
       text = "Offline";
@@ -781,7 +895,12 @@ function StatusBadge({
   }
 
   return (
-    <div className="pointer-events-none absolute left-4 top-20 z-10 flex flex-col gap-1.5">
+    <div
+      className="pointer-events-none absolute left-4 top-20 z-10 flex flex-col gap-1.5"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
       <div className={`rounded bg-ink-900/85 px-3 py-1.5 font-mono text-xs backdrop-blur ${tone}`}>
         <span className="mr-2 inline-block h-1.5 w-1.5 rounded-full" style={{ background: dotColor(status.kind), boxShadow: `0 0 6px ${dotColor(status.kind)}`}} />
         {text}
@@ -801,6 +920,7 @@ function dotColor(kind: LivePollStatus["kind"]): string {
       return "#43e27a";
     case "empty":
       return "#8a8a96";
+    case "delayed":
     case "too_wide":
       return "#fbbf77";
     case "rate_limited":
@@ -811,4 +931,23 @@ function dotColor(kind: LivePollStatus["kind"]): string {
     default:
       return "#8a8a96";
   }
+}
+
+
+/** Find the trail sample whose timestamp is closest to `at`. */
+function nearestTrailSample(
+  trail: Array<[number, number, number]>,
+  at: number
+): [number, number, number] | null {
+  if (trail.length === 0) return null;
+  let best = trail[0]!;
+  let bestDelta = Math.abs(best[2] - at);
+  for (let i = 1; i < trail.length; i++) {
+    const d = Math.abs(trail[i]![2] - at);
+    if (d < bestDelta) {
+      best = trail[i]!;
+      bestDelta = d;
+    }
+  }
+  return best;
 }

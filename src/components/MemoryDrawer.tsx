@@ -16,10 +16,12 @@ import {
   topFrequentVisitors,
   regularVisitors,
   busiestHour,
+  airlineDistribution,
   prettyPattern,
   type DigestSummary,
   type RegularVisitor,
   type HourOfDayStat,
+  type AirlineShare,
 } from "../lib/sightings";
 import type { AircraftSighting } from "./../lib/db";
 import { parseCallsign, prettyFlightName } from "../lib/callsign";
@@ -37,21 +39,24 @@ export function MemoryDrawer({
   const [top, setTop] = useState<AircraftSighting[] | null>(null);
   const [regulars, setRegulars] = useState<RegularVisitor[] | null>(null);
   const [peakHour, setPeakHour] = useState<HourOfDayStat | null>(null);
+  const [airlines, setAirlines] = useState<AirlineShare[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [d, topList, regs, bh] = await Promise.all([
+      const [d, topList, regs, bh, airs] = await Promise.all([
         digestSummary(),
         topFrequentVisitors(30),
         regularVisitors(8),
         busiestHour(),
+        airlineDistribution(8),
       ]);
       if (cancelled) return;
       setDigest(d);
       setTop(topList);
       setRegulars(regs);
       setPeakHour(bh);
+      setAirlines(airs);
     })().catch(() => {
       /* non-fatal */
     });
@@ -158,6 +163,36 @@ export function MemoryDrawer({
           <span className="text-ink-500"> · {peakHour.count} sightings</span>
         </section>
       )}
+
+      {airlines && airlines.length > 0 && (
+        <section className="border-b border-ink-800 px-4 py-3">
+          <p className="font-mono text-[9px] uppercase tracking-widest text-accent">
+            top airlines over your sky
+          </p>
+          <ul className="mt-2 space-y-1.5">
+            {airlines.map((a) => (
+              <li key={a.icao ?? "_unknown"} className="flex items-center gap-2">
+                <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-100">
+                  {a.name}
+                </span>
+                <span className="font-mono tabular-nums text-[10px] text-ink-400">
+                  {a.count}
+                </span>
+                <div className="h-1.5 w-16 overflow-hidden rounded-full bg-ink-800">
+                  <div
+                    className="h-full bg-accent"
+                    style={{ width: `${Math.max(2, Math.round(a.share * 100))}%` }}
+                  />
+                </div>
+                <span className="w-10 text-right font-mono tabular-nums text-[10px] text-ink-300">
+                  {(a.share * 100).toFixed(a.share < 0.1 ? 1 : 0)}%
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
 
       <div className="flex-1 overflow-y-auto">
         <p className="px-4 py-3 font-mono text-[9px] uppercase tracking-widest text-ink-500">

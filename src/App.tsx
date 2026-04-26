@@ -44,6 +44,8 @@ import { DetailPanel } from "./components/DetailPanel";
 import { SettingsDrawer } from "./components/SettingsDrawer";
 import { WelcomeHint } from "./components/WelcomeHint";
 import { DigestCard } from "./components/DigestCard";
+import { TimeMachineSlider } from "./components/TimeMachineSlider";
+import { FilterBar, type AltitudeBand, type CategoryFilter, statePassesFilter } from "./components/FilterBar";
 import { HelpModal } from "./components/HelpModal";
 import { MemoryDrawer } from "./components/MemoryDrawer";
 import { getSighting } from "./lib/sightings";
@@ -76,6 +78,10 @@ export function App(): JSX.Element {
   const [helpOpen, setHelpOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [trackPromptOpen, setTrackPromptOpen] = useState(false);
+  const [replayOpen, setReplayOpen] = useState(false);
+  const [replayOffsetSec, setReplayOffsetSec] = useState(0);
+  const [altitudeBand, setAltitudeBand] = useState<AltitudeBand>("all");
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [trackedStatus, setTrackedStatus] = useState<TrackedFlightStatus | null>(
     null
   );
@@ -160,15 +166,26 @@ export function App(): JSX.Element {
           t.isContentEditable)
       )
         return;
+      // Single-letter shortcuts. `handled` lets us preventDefault so
+      // the same keypress doesn't leak into a focused input that we
+      // just opened.
+      let handled = true;
       if (e.key === "s") setShowSatellites((v) => !v);
       else if (e.key === "l") setListOpen((v) => !v);
       else if (e.key === "h") setHomeSetupOpen((v) => !v);
       else if (e.key === "t") setTimelineOpen((v) => !v);
       else if (e.key === "?") setHelpOpen((v) => !v);
       else if (e.key === "m") setMemoryOpen((v) => !v);
+      else if (e.key === "r") setReplayOpen((v) => !v);
       else if (e.key === "f") {
         if (trackerRef.current) stopTracking();
         else setTrackPromptOpen(true);
+      } else {
+        handled = false;
+      }
+      if (handled) {
+        e.preventDefault();
+        e.stopPropagation();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -233,6 +250,9 @@ export function App(): JSX.Element {
         ref={mapRef}
         onSelectAircraft={handleSelectLive}
         selectedIcao24={selectedLive?.icao24 ?? null}
+        replayOffsetSec={replayOpen ? replayOffsetSec : 0}
+        altitudeBand={altitudeBand}
+        categoryFilter={categoryFilter}
         showSatellites={showSatellites}
         onAircraftListChange={(list) => {
           setAircraft(list);
@@ -300,6 +320,25 @@ export function App(): JSX.Element {
             _operator: s.operator,
           });
         }}
+      />
+      <TimeMachineSlider
+        open={replayOpen}
+        offsetSec={replayOffsetSec}
+        onOffsetChange={setReplayOffsetSec}
+        onClose={() => {
+          setReplayOpen(false);
+          setReplayOffsetSec(0);
+        }}
+      />
+      <FilterBar
+        altitudeBand={altitudeBand}
+        onAltitudeChange={setAltitudeBand}
+        categoryFilter={categoryFilter}
+        onCategoryChange={setCategoryFilter}
+        filteredCount={
+          aircraft.filter((s) => statePassesFilter(s, altitudeBand, categoryFilter)).length
+        }
+        totalCount={aircraft.length}
       />
       <WelcomeHint />
 

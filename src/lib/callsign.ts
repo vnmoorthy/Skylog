@@ -165,3 +165,10 @@ export function prettyFlightName(parsed: ParsedCallsign): string {
   }
   return parsed.raw;
 }
+
+
+/** Lookup the human-friendly name for an ICAO airline designator,
+ *  or null if not in our curated table. */
+export function airlineName(icao: string): string | null {
+  return AIRLINES[icao.toUpperCase()] ?? null;
+}

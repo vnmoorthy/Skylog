@@ -18,6 +18,7 @@
 
 import { db, type AircraftSighting } from "./db";
 import type { StateVector } from "./opensky";
+import { parseCallsign, airlineName } from "./callsign";
 
 const MAX_CALLSIGNS = 12;
 const MAX_RECENT_DAYS = 30;
@@ -301,4 +302,51 @@ export async function busiestHour(): Promise<HourOfDayStat | null> {
   }
   if (bestH === -1 || bestN === 0) return null;
   return { hour: bestH, count: bestN };
+}
+
+
+/* =====================================================================
+ * Airline distribution: who flies over my sky most?
+ * =====================================================================
+ */
+
+export interface AirlineShare {
+  /** ICAO code (e.g. "UAL"). null for general aviation / military / unknown. */
+  readonly icao: string | null;
+  /** Human-friendly airline name when we know it, else the ICAO code,
+   *  else "General aviation / unknown". */
+  readonly name: string;
+  /** Total sightings whose lastCallsign maps to this airline. */
+  readonly count: number;
+  /** Share of total sightings, 0..1. */
+  readonly share: number;
+}
+
+export async function airlineDistribution(
+  limit: number = 10
+): Promise<AirlineShare[]> {
+  const all = await db.sightings.toArray();
+  if (all.length === 0) return [];
+  const tally = new Map<string | null, number>();
+  for (const s of all) {
+    const parsed = parseCallsign(s.lastCallsign);
+    const key = parsed.airlineIcao ?? null;
+    tally.set(key, (tally.get(key) ?? 0) + s.sightingCount);
+  }
+  const totalSightings = Array.from(tally.values()).reduce((a, b) => a + b, 0);
+  if (totalSightings === 0) return [];
+  const shares: AirlineShare[] = [];
+  for (const [icao, count] of tally) {
+    shares.push({
+      icao,
+      name:
+        icao == null
+          ? "General aviation / unknown"
+          : airlineName(icao) ?? icao,
+      count,
+      share: count / totalSightings,
+    });
+  }
+  shares.sort((a, b) => b.count - a.count);
+  return shares.slice(0, limit);
 }

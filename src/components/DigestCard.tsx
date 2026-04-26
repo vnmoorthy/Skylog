@@ -93,6 +93,8 @@ export function DigestCard({
         collapsed ? "w-auto" : "w-[300px] max-w-[calc(100vw-1.5rem)]"
       } rounded-md border border-ink-800 bg-ink-900/85 backdrop-blur transition-all`}
       role="status"
+      aria-live="polite"
+      aria-label="Today's sky digest"
     >
       <button
         onClick={() => setCollapsed((v) => !v)}

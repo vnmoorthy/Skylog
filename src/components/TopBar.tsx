@@ -105,7 +105,14 @@ function Btn({
     : `${base} text-ink-300 hover:text-ink-100 hover:bg-ink-800/80`;
   const title = shortcut ? `shortcut: ${shortcut}` : undefined;
   return (
-    <button onClick={onClick} disabled={disabled} className={cls} title={title}>
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={cls}
+      title={title}
+      aria-pressed={active ? "true" : undefined}
+      aria-keyshortcuts={shortcut?.toLowerCase()}
+    >
       {children}
     </button>
   );

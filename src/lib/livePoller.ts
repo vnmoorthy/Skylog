@@ -24,10 +24,15 @@ export type LivePollStatus =
   | { kind: "loading" }
   | { kind: "ok"; count: number; at: number }
   | { kind: "empty"; at: number }
+  | { kind: "delayed"; lastGoodAt: number; lastCount: number }
   | { kind: "too_wide" }
   | { kind: "rate_limited"; retryAt: number }
   | { kind: "offline" }
   | { kind: "error"; message: string };
+
+/** Window after a successful poll within which transient errors are
+ *  presented as "delayed" rather than "error". 60 s ≈ 6 poll cycles. */
+const DELAYED_WINDOW_MS = 60_000;
 
 export const POLL_INTERVAL_MS = 10_000;
 
@@ -141,6 +146,8 @@ export function startLivePoller(
   let bbox = initialBBox;
   let cancelled = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let lastGoodAt = 0;
+  let lastCount = 0;
 
   onStatus({ kind: "loading" });
 
@@ -170,7 +177,12 @@ export function startLivePoller(
         return;
       }
       if (!res.ok) {
-        onStatus({ kind: "error", message: `HTTP ${res.status}` });
+        const recentlyGood = lastGoodAt > 0 && Date.now() - lastGoodAt < DELAYED_WINDOW_MS;
+        onStatus(
+          recentlyGood
+            ? { kind: "delayed", lastGoodAt, lastCount }
+            : { kind: "error", message: `HTTP ${res.status}` }
+        );
         schedule();
         return;
       }
@@ -180,11 +192,13 @@ export function startLivePoller(
       const states: StateVector[] = (json.ac ?? [])
         .map((a) => alToStateVector(a, now))
         .filter((s): s is StateVector => s !== null);
+      lastGoodAt = Date.now();
+      lastCount = states.length;
       onStates(states);
       onStatus(
         states.length > 0
-          ? { kind: "ok", count: states.length, at: Date.now() }
-          : { kind: "empty", at: Date.now() }
+          ? { kind: "ok", count: states.length, at: lastGoodAt }
+          : { kind: "empty", at: lastGoodAt }
       );
       schedule();
     } catch (err) {
