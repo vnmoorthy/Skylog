@@ -20,6 +20,7 @@ import {
   type UnitSystem,
 } from "../lib/units";
 import { lookupAircraft, type AircraftInfo } from "../lib/aircraftDb";
+import { fetchAircraftPhoto, type AircraftPhoto } from "../lib/aircraftPhoto";
 import { getSighting } from "../lib/sightings";
 import type { AircraftSighting } from "../lib/db";
 import { haversineMeters } from "../lib/geo";
@@ -87,6 +88,19 @@ export function FlightCard({ state, onClose }: FlightCardProps): JSX.Element {
     };
   }, [state.icao24]);
 
+
+  const [photo, setPhoto] = useState<AircraftPhoto | null>(null);
+  useEffect(() => {
+    setPhoto(null);
+    const reg = (state._registration ?? ac?.registration ?? "").trim();
+    if (!reg) return;
+    let cancelled = false;
+    fetchAircraftPhoto(reg).then((p) => {
+      if (!cancelled) setPhoto(p);
+    });
+    return () => { cancelled = true; };
+  }, [state._registration, ac?.registration]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === "Escape") onClose();
@@ -114,6 +128,27 @@ export function FlightCard({ state, onClose }: FlightCardProps): JSX.Element {
       role="dialog"
       aria-label={`Flight ${title}`}
     >
+      {photo && (
+        <a
+          href={photo.pageUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="block"
+          title={photo.photographer ? `Photo: ${photo.photographer} · click for full size` : "Photo on planespotters.net"}
+        >
+          <img
+            src={photo.largeUrl}
+            alt={`Aircraft ${state._registration ?? state.icao24}`}
+            className="block aspect-[3/2] w-full object-cover"
+            loading="lazy"
+          />
+          {photo.photographer && (
+            <div className="bg-ink-950/85 px-3 py-1 font-mono text-[9px] uppercase tracking-wider text-ink-400">
+              📷 {photo.photographer} · planespotters.net
+            </div>
+          )}
+        </a>
+      )}
       <header className="flex items-start justify-between gap-3 border-b border-ink-800 px-4 py-3">
         <div className="min-w-0">
           <p className="font-mono text-[10px] uppercase tracking-wider text-ink-500">
