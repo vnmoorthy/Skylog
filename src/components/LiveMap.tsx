@@ -101,6 +101,36 @@ const DARK_STYLE: maplibregl.StyleSpecification = {
   ],
 };
 
+const LIGHT_STYLE: maplibregl.StyleSpecification = {
+  version: 8,
+  sources: {
+    basemap: {
+      type: "raster",
+      tiles: [
+        "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+        "https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+        "https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+        "https://d.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+      ],
+      tileSize: 256,
+      attribution:
+        '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> contributors, &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    },
+  },
+  layers: [
+    {
+      id: "background",
+      type: "background",
+      paint: { "background-color": "#f8f8f9" },
+    },
+    {
+      id: "basemap",
+      type: "raster",
+      source: "basemap",
+    },
+  ],
+};
+
 // Stable SVG string — we set the fill via inline `color:` on the host div
 // using SVG's currentColor. This lets us swap colours on altitude change
 // without replacing the DOM subtree (which kills the CSS transition
@@ -151,6 +181,7 @@ export const LiveMap = forwardRef<LiveMapHandle, LiveMapProps>(function LiveMap(
   const replayRef = useRef<number>(0);
 
   const home = useSky((s) => s.home);
+  const theme = useSky((s) => s.theme);
   const radiusM = useSky((s) => s.radiusMeters);
 
   const [status, setStatus] = useState<LivePollStatus>({ kind: "loading" });
@@ -176,7 +207,7 @@ export const LiveMap = forwardRef<LiveMapHandle, LiveMapProps>(function LiveMap(
 
     const map = new maplibregl.Map({
       container: container.current,
-      style: DARK_STYLE,
+      style: theme === "dark" ? DARK_STYLE : LIGHT_STYLE,
       center: initialCenter,
       zoom: initialZoom,
       minZoom: 2,
@@ -533,6 +564,15 @@ export const LiveMap = forwardRef<LiveMapHandle, LiveMapProps>(function LiveMap(
   useEffect(() => {
     rebuildHomeRing();
   }, [home, radiusM, status, rebuildHomeRing]);
+
+  useEffect(() => {
+    const isDark = theme === "dark";
+    document.documentElement.classList.toggle("dark", isDark);
+    
+    if (mapRef.current) {
+      mapRef.current.setStyle(isDark ? DARK_STYLE : LIGHT_STYLE);
+    }
+  }, [theme]);
 
   /* -------------------- render -------------------- */
   return (

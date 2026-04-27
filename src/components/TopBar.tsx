@@ -36,10 +36,12 @@ export function TopBar({
   memoryOpen,
   onPickRegion,
   onOpenTrack,
-  isTracking,
+  isTracking
 }: TopBarProps): JSX.Element {
   const home = useSky((s) => s.home);
   const passCount = useSky((s) => Object.keys(s.passes).length);
+  const toggleTheme = useSky((s) => s.toggleTheme);
+  const theme = useSky((s) => s.theme);
   const setSettingsOpen = useSky((s) => s.setSettingsOpen);
 
   return (
@@ -75,6 +77,9 @@ export function TopBar({
         </Btn>
         <Btn onClick={onOpenTimeline} disabled={!home} shortcut="T">
           timeline{passCount > 0 ? ` (${passCount})` : ""}
+        </Btn>
+        <Btn onClick={toggleTheme} shortcut="C">
+          {theme === "dark" ? "light Mode" : "dark Mode"}
         </Btn>
         <Btn onClick={onOpenHelp} shortcut="?">help</Btn>
         <Btn onClick={() => setSettingsOpen(true)}>settings</Btn>
